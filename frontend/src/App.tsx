@@ -384,7 +384,14 @@ export default function App() {
     gradoApi,
     aguaPorcentaje,
     gravedadEspecificaAgua,
-    points
+    points,
+    // Parámetros de instalación para System Demand Curve
+    profundidadIntake,
+    nivelFluidoDinamico,
+    presionSuperficie,
+    presionCasing,
+    tubingIdMm,
+    tubingRoughness
   ])
   
   // useEffect para actualizar curvas en modo comparador

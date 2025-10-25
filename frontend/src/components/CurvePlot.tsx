@@ -1283,6 +1283,12 @@ function IPRPlot({ iprData, pressureDemandCurve }: any) {
     )
   }
   
+  // DEBUG: Verificar si tenemos datos de System Demand
+  console.log('IPRPlot - pressureDemandCurve:', pressureDemandCurve ? 'PRESENTE' : 'NO DISPONIBLE')
+  if (pressureDemandCurve) {
+    console.log('pressureDemandCurve tiene', pressureDemandCurve.curve?.length || 0, 'puntos')
+  }
+  
   const iprQ = iprData.curve.map((p: any) => p.caudal)
   const iprPwf = iprData.curve.map((p: any) => p.pwf)
   const iprNivel = iprData.curve.map((p: any) => p.nivel || 0)
