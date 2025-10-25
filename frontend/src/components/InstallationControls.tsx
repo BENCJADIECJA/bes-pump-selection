@@ -82,7 +82,7 @@ export default function InstallationControls(props: InstallationControlsProps) {
         </h3>
         
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '20px', color: '#95a5a6' }}>
+          <div style={{ textAlign: 'center', padding: '20px', color: '#c7d4f0' }}>
             Cargando catálogo de tuberías...
           </div>
         ) : (
@@ -91,7 +91,7 @@ export default function InstallationControls(props: InstallationControlsProps) {
             <div style={{ marginBottom: '15px', padding: '12px', background: 'rgba(52, 152, 219, 0.1)', borderRadius: '6px', border: '1px solid rgba(52, 152, 219, 0.3)' }}>
               <h4 style={{ margin: '0 0 10px 0', color: '#3498db', fontSize: '0.95rem' }}>📏 Profundidad</h4>
               <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                <span style={{ fontWeight: 600, color: '#34495e' }}>Profundidad Intake (m):</span>
+                <span style={{ fontWeight: 600, color: '#d6def7' }}>Profundidad Intake (m):</span>
                 <input
                   type="number"
                   value={profundidadIntake}
@@ -110,7 +110,7 @@ export default function InstallationControls(props: InstallationControlsProps) {
               <h4 style={{ margin: '0 0 10px 0', color: '#9b59b6', fontSize: '0.95rem' }}>🔩 Tubería de Producción (Tubing)</h4>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                  <span style={{ fontWeight: 600, color: '#34495e' }}>Tamaño de Tubería:</span>
+                  <span style={{ fontWeight: 600, color: '#d6def7' }}>Tamaño de Tubería:</span>
                   <select
                     value={tubingSelected}
                     onChange={(e) => handleTubingChange(e.target.value)}
@@ -124,17 +124,17 @@ export default function InstallationControls(props: InstallationControlsProps) {
                   </select>
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                  <span style={{ fontWeight: 600, color: '#34495e' }}>ID Tubería (mm):</span>
+                  <span style={{ fontWeight: 600, color: '#d6def7' }}>ID Tubería (mm):</span>
                   <input
                     type="number"
                     value={tubingIdMm}
                     readOnly
-                    style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #95a5a6', background: '#ecf0f1', color: '#7f8c8d' }}
+                    style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #b0bcdc', background: '#1b253a', color: '#dce8ff' }}
                     title="Diámetro interno de la tubería (calculado automáticamente)"
                   />
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                  <span style={{ fontWeight: 600, color: '#34495e' }}>Condición Tubería:</span>
+                  <span style={{ fontWeight: 600, color: '#d6def7' }}>Condición Tubería:</span>
                   <select
                     value={tubingRoughness}
                     onChange={(e) => setTubingRoughness(e.target.value)}
@@ -155,7 +155,7 @@ export default function InstallationControls(props: InstallationControlsProps) {
               <h4 style={{ margin: '0 0 10px 0', color: '#2ecc71', fontSize: '0.95rem' }}>💨 Presiones del Sistema</h4>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                  <span style={{ fontWeight: 600, color: '#34495e' }}>Presión Superficie (bar):</span>
+                  <span style={{ fontWeight: 600, color: '#d6def7' }}>Presión Superficie (bar):</span>
                   <input
                     type="number"
                     value={presionSuperficie}
@@ -168,7 +168,7 @@ export default function InstallationControls(props: InstallationControlsProps) {
                   />
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                  <span style={{ fontWeight: 600, color: '#34495e' }}>Presión Casing (bar):</span>
+                  <span style={{ fontWeight: 600, color: '#d6def7' }}>Presión Casing (bar):</span>
                   <input
                     type="number"
                     value={presionCasing}
@@ -190,7 +190,7 @@ export default function InstallationControls(props: InstallationControlsProps) {
               borderRadius: '6px', 
               border: '1px solid rgba(241, 196, 15, 0.5)',
               fontSize: '0.85rem',
-              color: '#7f8c8d'
+              color: '#c0cee8'
             }}>
               <strong style={{ color: '#f39c12' }}>ℹ️ Nota:</strong> La presión de casing ayuda a empujar el fluido hacia el intake de la bomba, 
               reduciendo el TDH requerido. Una mayor presión de casing significa menos carga para la bomba.

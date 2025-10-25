@@ -6,6 +6,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS  # Necesario para permitir la comunicación con el front-end (React)
 from flask import send_file, make_response
 import io
+from copy import deepcopy
 
 # Importamos nuestros módulos de cálculo
 import well_performance
@@ -18,6 +19,34 @@ import tubing_catalog
 app = Flask(__name__)
 # Configuramos CORS para permitir peticiones desde nuestro front-end
 CORS(app)
+
+SCENARIO_ORDER = ['optimistic', 'conservative', 'pessimistic']
+SCENARIO_CONFIG = {
+    'optimistic': {
+        'label': 'Optimistic',
+        'description': 'Higher productivity (+15% Q) and slightly lower surface backpressure (-10%).',
+        'ipr_scale': 1.15,
+        'surface_pressure_multiplier': 0.9,
+        'roughness_multiplier': 0.9,
+        'color': '#2ecc71'
+    },
+    'conservative': {
+        'label': 'Conservative',
+        'description': 'Base case using nominal reservoir and installation inputs.',
+        'ipr_scale': 1.0,
+        'surface_pressure_multiplier': 1.0,
+        'roughness_multiplier': 1.0,
+        'color': '#3498db'
+    },
+    'pessimistic': {
+        'label': 'Pessimistic',
+        'description': 'Lower productivity (-15% Q) with increased backpressure (+10%) and roughness (+10%).',
+        'ipr_scale': 0.85,
+        'surface_pressure_multiplier': 1.1,
+        'roughness_multiplier': 1.1,
+        'color': '#e74c3c'
+    }
+}
 
 @app.route('/api/calculate_conditions', methods=['POST'])
 def calculate_conditions():
@@ -52,7 +81,55 @@ def calculate_conditions():
             print(f"Punto {i}: Q={point['caudal']:.1f} m3/d, TDH={point['tdh']:.2f} m, PIP={point['pip']:.2f} bar, Nivel={point.get('nivel', 'N/A')}")
         print("="*80 + "\n")
 
-        # 4. Aplicar correcciones por gas si es necesario
+        # 4. Construir escenarios de sensibilidad (optimista / conservador / pesimista)
+        scenario_definitions = {}
+        ipr_scenarios = {}
+        pressure_demand_scenarios = {}
+
+        if ipr_result:
+            base_roughness = well_data.get('tubing_roughness_mm', 0.046)
+
+            for key in SCENARIO_ORDER:
+                config = SCENARIO_CONFIG.get(key, {})
+                scenario_definitions[key] = {
+                    'label': config.get('label', key.title()),
+                    'description': config.get('description'),
+                    'ipr_scale': config.get('ipr_scale', 1.0),
+                    'surface_pressure_multiplier': config.get('surface_pressure_multiplier', 1.0),
+                    'roughness_multiplier': config.get('roughness_multiplier', 1.0),
+                    'color': config.get('color')
+                }
+
+                if key == 'conservative':
+                    ipr_scenarios[key] = deepcopy(ipr_result)
+                    pressure_demand_scenarios[key] = deepcopy(pressure_demand_curve)
+                    continue
+
+                scenario_ipr = well_performance.scale_ipr_curve(
+                    ipr_result,
+                    config.get('ipr_scale', 1.0),
+                    scenario_key=key
+                )
+
+                if not scenario_ipr:
+                    scenario_ipr = deepcopy(ipr_result)
+
+                scenario_well_data = dict(well_data)
+                surface_multiplier = config.get('surface_pressure_multiplier', 1.0)
+                roughness_multiplier = config.get('roughness_multiplier', 1.0)
+
+                scenario_well_data['presion_superficie'] = scenario_well_data.get('presion_superficie', 10) * surface_multiplier
+                scenario_well_data['tubing_roughness_mm'] = base_roughness * roughness_multiplier
+
+                scenario_pressure_demand = hydraulic_calculations.calculate_pressure_demand_curve(
+                    scenario_well_data,
+                    scenario_ipr
+                )
+
+                ipr_scenarios[key] = scenario_ipr
+                pressure_demand_scenarios[key] = scenario_pressure_demand
+
+        # 5. Aplicar correcciones por gas si es necesario
         gas_corrections = gas_effects.get_gas_corrections(well_data)
 
         return jsonify({
@@ -60,7 +137,11 @@ def calculate_conditions():
             "ipr_data": ipr_result,
             "system_head_curve": system_head_curve,
             "pressure_demand_curve": pressure_demand_curve,
-            "gas_corrections": gas_corrections
+            "gas_corrections": gas_corrections,
+            "ipr_scenarios": ipr_scenarios,
+            "pressure_demand_scenarios": pressure_demand_scenarios,
+            "scenario_definitions": scenario_definitions,
+            "scenario_order": SCENARIO_ORDER
         }), 200
 
     except Exception as e:

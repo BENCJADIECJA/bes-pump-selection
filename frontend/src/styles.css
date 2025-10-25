@@ -12,7 +12,8 @@ html, body {
 
 body { 
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: white;
+  background: #05080f;
+  color: #f1f5ff;
   min-height: 100vh;
   padding: 0;
 }
@@ -29,7 +30,7 @@ body {
   min-height: 100vh;
   max-width: 100%;
   margin: 0;
-  background: white;
+  background: linear-gradient(145deg, rgba(6, 10, 20, 0.95) 0%, rgba(9, 15, 28, 0.92) 40%, rgba(12, 18, 36, 0.9) 100%);
   border-radius: 0;
   box-shadow: none;
   padding: 16px;
@@ -46,16 +47,13 @@ body {
 
 .app h1 {
   font-size: clamp(1.5rem, 4vw, 2.5rem);
-  color: #2c3e50;
+  color: #9cc0ff;
   margin-bottom: 20px;
   text-align: center;
   font-weight: 700;
   letter-spacing: -0.5px;
   padding: 12px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  text-shadow: 0 0 18px rgba(102, 126, 234, 0.4);
 }
 
 /* Responsive para móviles */
@@ -72,9 +70,9 @@ body {
   align-items: center;
   margin-bottom: 24px;
   padding: 16px;
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  background: linear-gradient(145deg, rgba(17, 25, 42, 0.85) 0%, rgba(9, 15, 28, 0.9) 100%);
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 14px 28px rgba(4, 8, 16, 0.6);
   flex-wrap: wrap;
 }
 
@@ -96,20 +94,22 @@ body {
 
 .pump-selector label {
   font-weight: 600;
-  color: #34495e;
+  color: #dae3ff;
   font-size: clamp(0.9rem, 2vw, 1rem);
 }
 
 .pump-selector select {
   padding: 10px 16px;
-  border: 2px solid #667eea;
+  border: 1px solid rgba(102, 126, 234, 0.75);
   border-radius: 8px;
   font-size: clamp(0.9rem, 2vw, 1rem);
-  background: white;
+  background: rgba(11, 18, 30, 0.95);
+  color: #e1e7ff;
   cursor: pointer;
   transition: all 0.3s ease;
   min-width: 180px;
   max-width: 100%;
+  box-shadow: inset 0 0 0 1px rgba(102, 126, 234, 0.25);
 }
 
 /* Responsive para móviles */
@@ -128,14 +128,14 @@ body {
 }
 
 .pump-selector select:hover {
-  border-color: #764ba2;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  border-color: rgba(118, 75, 162, 0.9);
+  box-shadow: 0 0 16px rgba(102, 126, 234, 0.35);
 }
 
 .pump-selector select:focus {
   outline: none;
-  border-color: #764ba2;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+  border-color: rgba(118, 75, 162, 0.95);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.45);
 }
 
 .curve-controls {
@@ -151,7 +151,7 @@ body {
   align-items: center;
   gap: 8px;
   font-weight: 600;
-  color: #34495e;
+  color: #d5dcff;
   font-size: clamp(0.85rem, 2vw, 0.95rem);
 }
 
@@ -169,17 +169,18 @@ body {
 
 .curve-controls .checkbox-label {
   padding: 8px 16px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #3748a5 0%, #8a3ce6 100%);
   color: white;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.3s ease;
   user-select: none;
+  box-shadow: 0 12px 24px rgba(62, 83, 210, 0.45);
 }
 
 .curve-controls .checkbox-label:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 6px 18px rgba(102, 126, 234, 0.5);
 }
 
 .curve-controls .checkbox-label input[type="checkbox"] {
@@ -190,11 +191,13 @@ body {
 
 .curve-controls input {
   padding: 8px 12px;
-  border: 2px solid #667eea;
+  border: 1px solid rgba(102, 126, 234, 0.75);
   border-radius: 6px;
   font-size: clamp(0.85rem, 2vw, 0.95rem);
   width: 100px;
   transition: all 0.3s ease;
+  background: rgba(11, 18, 30, 0.95);
+  color: #e6ecff;
 }
 
 /* Responsive para móviles */
@@ -206,18 +209,18 @@ body {
 }
 
 .curve-controls input:hover {
-  border-color: #764ba2;
+  border-color: rgba(118, 75, 162, 0.9);
 }
 
 .curve-controls input:focus {
   outline: none;
-  border-color: #764ba2;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+  border-color: rgba(118, 75, 162, 0.95);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.45);
 }
 
 .curve-controls button {
   padding: 10px 32px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #3b4ad0 0%, #a04bff 100%);
   color: white;
   border: none;
   border-radius: 8px;
@@ -225,12 +228,12 @@ body {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 18px 34px rgba(66, 88, 220, 0.55);
 }
 
 .curve-controls button:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+  box-shadow: 0 24px 40px rgba(102, 126, 234, 0.55);
 }
 
 .curve-controls button:active {
@@ -238,11 +241,11 @@ body {
 }
 
 .error { 
-  color: #e74c3c;
-  background: #fadbd8;
+  color: #ff9f8c;
+  background: rgba(140, 28, 28, 0.25);
   padding: 16px;
   border-radius: 8px;
-  border-left: 4px solid #e74c3c;
+  border-left: 4px solid rgba(231, 76, 60, 0.8);
   margin: 16px 0;
   font-weight: 500;
 }
@@ -251,15 +254,15 @@ body {
   text-align: center;
   padding: 32px;
   font-size: 1.2rem;
-  color: #667eea;
+  color: #8aa8ff;
   font-weight: 600;
 }
 
 .plot-container {
-  background: white;
+  background: rgba(10, 16, 28, 0.92);
   border-radius: 12px;
   padding: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 18px 40px rgba(2, 6, 14, 0.65);
   margin-top: 16px;
   width: 100%;
   max-width: 100%;
@@ -277,18 +280,18 @@ body {
 
 /* Checkbox principal Comparison Mode arriba */
 .checkbox-label {
-  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(120deg, #3242a8 0%, #8e3ffe 100%);
   color: white;
   font-weight: 600;
   font-size: clamp(0.95rem, 2.5vw, 1.15rem);
   padding: 10px 24px;
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(52, 73, 94, 0.08);
+  box-shadow: 0 14px 28px rgba(34, 46, 130, 0.55);
   display: flex;
   align-items: center;
   gap: 12px;
   cursor: pointer;
-  border: 2px solid #764ba2;
+  border: 2px solid rgba(142, 63, 254, 0.7);
   transition: border 0.2s, box-shadow 0.2s;
   margin-bottom: 0;
 }
@@ -316,16 +319,17 @@ body {
 }
 
 .checkbox-label:hover {
-  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.18);
+  box-shadow: 0 20px 36px rgba(102, 126, 234, 0.5);
   border-color: #e67e22;
 }
 
 /* Tabs para gráficos múltiples */
 .tabs-container {
-  margin-top: 24px;
-  background: white;
+  margin-top: 0;
+  background: rgba(9, 15, 28, 0.92);
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 18px 38px rgba(2, 6, 14, 0.65);
+  border: 1px solid rgba(106, 132, 204, 0.45);
   overflow: visible;
   width: 100%;
   max-width: 100%;
@@ -333,11 +337,11 @@ body {
 
 .tabs-header {
   display: flex;
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  border-bottom: 3px solid #dce2eb;
+  background: linear-gradient(135deg, rgba(20, 28, 46, 0.95) 0%, rgba(13, 20, 35, 0.95) 100%);
+  border-bottom: 3px solid rgba(64, 82, 126, 0.6);
   overflow-x: auto;
   scrollbar-width: thin;
-  scrollbar-color: #667eea #f5f7fa;
+  scrollbar-color: #667eea rgba(20, 28, 46, 0.95);
   border-radius: 12px 12px 0 0;
 }
 
@@ -346,11 +350,11 @@ body {
 }
 
 .tabs-header::-webkit-scrollbar-track {
-  background: #f5f7fa;
+  background: rgba(20, 28, 46, 0.95);
 }
 
 .tabs-header::-webkit-scrollbar-thumb {
-  background: #667eea;
+  background: rgba(102, 126, 234, 0.85);
   border-radius: 3px;
 }
 
@@ -360,7 +364,7 @@ body {
   padding: 14px 20px;
   border: none;
   background: transparent;
-  color: #7f8c8d;
+  color: #a7b6d9;
   font-size: clamp(0.85rem, 2vw, 1rem);
   font-weight: 600;
   cursor: pointer;
@@ -393,30 +397,30 @@ body {
 }
 
 .tab-button:hover {
-  background: rgba(255, 255, 255, 0.5);
-  color: #2c3e50;
+  background: rgba(102, 126, 234, 0.18);
+  color: #ffffff;
 }
 
 .tab-button.active {
-  color: #2c3e50;
-  background: white;
-  border-bottom: 3px solid #3498db;
+  color: #ffffff;
+  background: rgba(15, 23, 42, 0.75);
+  border-bottom: 3px solid #5b7dff;
 }
 
 .tab-button.active.combined {
-  border-bottom-color: #3498db;
+  border-bottom-color: #5b7dff;
 }
 
 .tab-button.active.efficiency {
-  border-bottom-color: #2ecc71;
+  border-bottom-color: #40d28f;
 }
 
 .tab-button.active.head {
-  border-bottom-color: #e74c3c;
+  border-bottom-color: #ff7b6e;
 }
 
 .tab-button.active.bhp {
-  border-bottom-color: #f39c12;
+  border-bottom-color: #f6b347;
 }
 
 .tab-icon {
@@ -614,5 +618,259 @@ body, html, #root {
 
 .app > * {
   max-width: 100%;
+}
+
+.layout-two-column {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  width: 100%;
+  flex: 1;
+}
+
+.config-panel {
+  flex: 0 0 40%;
+  max-width: 40%;
+  width: 100%;
+  background: linear-gradient(180deg, rgba(14, 22, 38, 0.95) 0%, rgba(10, 16, 28, 0.92) 100%);
+  border-radius: 18px;
+  box-shadow: 0 22px 44px rgba(3, 6, 12, 0.7);
+  border: 1px solid rgba(99, 122, 214, 0.35);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.visual-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 0;
+}
+
+.global-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.toggle-chip {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.toggle-chip--active {
+  border-color: #e67e22 !important;
+}
+
+.toggle-chip--ipr-active {
+  border-color: #27ae60 !important;
+}
+
+.config-tabs {
+  background: rgba(12, 19, 34, 0.95);
+  border-radius: 16px;
+  box-shadow: inset 0 0 0 1px rgba(88, 110, 198, 0.35), 0 18px 36px rgba(3, 6, 12, 0.6);
+  border: 1px solid rgba(88, 110, 198, 0.35);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.config-tabs-header {
+  display: flex;
+  gap: 6px;
+  padding: 12px;
+  background: linear-gradient(90deg, rgba(19, 30, 52, 0.95) 0%, rgba(14, 23, 40, 0.95) 100%);
+  flex-wrap: wrap;
+}
+
+.config-tab-button {
+  flex: 1;
+  min-width: 150px;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #9fb4e9;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.config-tab-button.active {
+  background: rgba(29, 45, 82, 0.95);
+  color: #f2f6ff;
+  box-shadow: 0 12px 24px rgba(28, 50, 110, 0.4);
+}
+
+.config-tab-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: #dbe4ff;
+}
+
+.panel-card {
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 14px;
+  border: 1px solid rgba(99, 122, 214, 0.35);
+  box-shadow: 0 18px 32px rgba(3, 6, 12, 0.5);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panel-card--no-padding {
+  padding: 0;
+}
+
+.panel-heading {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #c5d4ff;
+  font-weight: 600;
+}
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.panel-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+  color: #d5defc;
+}
+
+.panel-field input,
+.panel-field select {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(102, 126, 234, 0.55);
+  background: rgba(11, 18, 30, 0.94);
+  font-weight: 500;
+  color: #e4ebff;
+}
+
+.panel-field input:focus,
+.panel-field select:focus {
+  outline: none;
+  border-color: rgba(118, 75, 162, 0.95);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.35);
+}
+
+.panel-hint {
+  padding: 10px 12px;
+  background: rgba(34, 197, 94, 0.18);
+  border-radius: 8px;
+  color: #8fffc1;
+  font-size: 0.9rem;
+  border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+.subtabs-header {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #f4f6fb;
+  border-bottom: 1px solid #e1e7f0;
+  flex-wrap: wrap;
+}
+
+.subtab-button {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  font-weight: 600;
+  color: #4a5876;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.subtab-button.active {
+  background: white;
+  color: #1f3a93;
+  box-shadow: 0 4px 12px rgba(18, 52, 114, 0.15);
+}
+
+.subtab-content {
+  padding: 16px;
+}
+
+.visual-tabs {
+  box-shadow: 0 10px 24px rgba(11, 25, 55, 0.08);
+}
+
+.visual-tabs-header {
+  border-radius: 12px 12px 0 0;
+}
+
+.visual-tab-content {
+  padding: 0;
+}
+
+.tab-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.empty-state {
+  padding: 36px;
+  text-align: center;
+  font-size: 1rem;
+  color: #607087;
+  background: rgba(96, 112, 135, 0.08);
+  border-radius: 12px;
+  border: 1px dashed rgba(96, 112, 135, 0.3);
+}
+
+@media (max-width: 1280px) {
+  .layout-two-column {
+    flex-direction: column;
+  }
+
+  .config-panel {
+    flex: 1 1 auto;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .layout-two-column {
+    gap: 16px;
+  }
+
+  .config-tabs-header {
+    flex-direction: column;
+  }
+
+  .config-tab-button {
+    width: 100%;
+  }
+
+  .panel-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .subtab-content {
+    padding: 12px;
+  }
+}
+
+@media (min-width: 900px) {
+  .global-toggles {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
 }
 

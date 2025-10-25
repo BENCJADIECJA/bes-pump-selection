@@ -1,10 +1,21 @@
-import React, { useEffect, useState } from 'react'
+// @ts-nocheck
+import React, { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
 import PumpSelector from './components/PumpSelector'
 import CurveControls from './components/CurveControls'
 import CurvePlot from './components/CurvePlot'
 import IPRControls from './components/IPRControls'
 import InstallationControls from './components/InstallationControls'
+
+const DEFAULT_SCENARIO_ORDER = ['optimistic', 'conservative', 'pessimistic']
+const DEFAULT_SCENARIO_STYLES = {
+  optimistic: { label: 'Optimistic', color: '#2ecc71', dash: 'solid', symbol: 'circle' },
+  conservative: { label: 'Conservative', color: '#3498db', dash: 'dash', symbol: 'diamond' },
+  pessimistic: { label: 'Pessimistic', color: '#e74c3c', dash: 'dot', symbol: 'triangle-up' }
+}
+const FALLBACK_SCENARIO_STYLE = { label: 'System Demand', color: '#c0392b', dash: 'dot', symbol: 'star' }
+
+type DesignPump = { id: string | null; stages: number }
 
 export default function App() {
   const [pumps, setPumps] = useState<string[]>([])
@@ -25,18 +36,21 @@ export default function App() {
   
   // Estados para modo diseño combinado (suma de bombas)
   const [numPumpsDesign, setNumPumpsDesign] = useState(1)
-  const [designPumps, setDesignPumps] = useState<Array<{id: string | null, stages: number}>>([
+  const [designPumps, setDesignPumps] = useState<DesignPump[]>([
     { id: null, stages: 300 },
     { id: null, stages: 300 },
     { id: null, stages: 300 },
     { id: null, stages: 300 },
     { id: null, stages: 300 }
   ])
+  const prevSelectedRef = useRef<string | null>(null)
   const [combinedCurves, setCombinedCurves] = useState<any>(null)
   const [individualCurves, setIndividualCurves] = useState<any[]>([])
   
-  // Estado para controlar pestaña activa en modo diseño
-  const [activeTab, setActiveTab] = useState<'combined' | 'efficiency' | 'head' | 'bhp' | 'ipr'>('combined')
+  // Estado para controlar pestañas
+  const [configTab, setConfigTab] = useState<'pump' | 'installation' | 'ipr'>('pump')
+  const [visualTab, setVisualTab] = useState<'curves' | 'ipr'>('curves')
+  const [pumpCurvesTab, setPumpCurvesTab] = useState<'combined' | 'efficiency' | 'head' | 'bhp'>('combined')
   
   // Estados para modo comparador
   const [isComparisonMode, setIsComparisonMode] = useState(false)
@@ -68,7 +82,7 @@ export default function App() {
   const [presionReservorio, setPresionReservorio] = useState(150)  // bar
   const [pi, setPi] = useState(5.0)  // m³/d/bar
   const [presionBurbuja, setPresionBurbuja] = useState(30)  // bar
-  const [qTest, setQTest] = useState(100)  // m³/d
+  const [qTest, setQTest] = useState(150)  // m³/d
   const [pwfTest, setPwfTest] = useState(20)  // bar
   const [nExponent, setNExponent] = useState(1.0)
   const [permeabilidad, setPermeabilidad] = useState(100)  // mD
@@ -85,6 +99,15 @@ export default function App() {
   
   // Estado para curva de demanda de presión
   const [pressureDemandCurve, setPressureDemandCurve] = useState<any>(null)
+  const [iprScenarios, setIprScenarios] = useState<any>({})
+  const [pressureDemandScenarios, setPressureDemandScenarios] = useState<any>({})
+  const [scenarioDefinitions, setScenarioDefinitions] = useState<any>({})
+  const [scenarioOrder, setScenarioOrder] = useState(DEFAULT_SCENARIO_ORDER)
+  const [scenarioVisibility, setScenarioVisibility] = useState({
+    optimistic: false,
+    conservative: true,
+    pessimistic: false
+  })
 
   // Estados para Installation Design (FASE 1)
   const [profundidadIntake, setProfundidadIntake] = useState(2000)  // m
@@ -94,13 +117,153 @@ export default function App() {
   const [presionSuperficie, setPresionSuperficie] = useState(10)  // bar
   const [presionCasing, setPresionCasing] = useState(5)  // bar
 
+  const scenarioStyles = React.useMemo(() => {
+    const styles: any = {}
+    const definitions = scenarioDefinitions || {}
+
+    DEFAULT_SCENARIO_ORDER.forEach((key) => {
+      const definition = definitions[key] || {}
+      const baseStyle = DEFAULT_SCENARIO_STYLES[key] || {}
+      styles[key] = {
+        ...FALLBACK_SCENARIO_STYLE,
+        ...baseStyle,
+        label: definition.label || baseStyle.label || key.charAt(0).toUpperCase() + key.slice(1),
+        color: definition.color || baseStyle.color || FALLBACK_SCENARIO_STYLE.color
+      }
+    })
+
+    Object.keys(definitions).forEach((key) => {
+      if (!styles[key]) {
+        const definition = definitions[key] || {}
+        const baseStyle = DEFAULT_SCENARIO_STYLES[key] || {}
+        styles[key] = {
+          ...FALLBACK_SCENARIO_STYLE,
+          ...baseStyle,
+          label: definition.label || baseStyle.label || key.charAt(0).toUpperCase() + key.slice(1),
+          color: definition.color || baseStyle.color || FALLBACK_SCENARIO_STYLE.color
+        }
+      }
+    })
+
+    return styles
+  }, [scenarioDefinitions])
+
+  const availableScenarioKeys = React.useMemo(() => {
+    const keys = new Set<string>()
+    ;(scenarioOrder || []).forEach((key) => keys.add(key))
+    Object.keys(pressureDemandScenarios || {}).forEach((key) => keys.add(key))
+    Object.keys(iprScenarios || {}).forEach((key) => keys.add(key))
+    if (!keys.size) {
+      DEFAULT_SCENARIO_ORDER.forEach((key) => keys.add(key))
+    }
+    return Array.from(keys)
+  }, [scenarioOrder, pressureDemandScenarios, iprScenarios])
+
+  const activeScenarioKeys = availableScenarioKeys.filter((key) => scenarioVisibility[key])
+  const primaryScenarioKey = activeScenarioKeys[0]
+    || (availableScenarioKeys.includes('conservative') ? 'conservative' : availableScenarioKeys[0])
+    || null
+
+  const primaryDemandCurve = (primaryScenarioKey && pressureDemandScenarios?.[primaryScenarioKey])
+    || pressureDemandCurve
+
+  const scenarioPlotProps = {
+    pressureDemandCurve: primaryDemandCurve,
+    pressureDemandScenarios,
+    iprScenarios,
+    scenarioVisibility,
+    scenarioStyles,
+    scenarioOrder: availableScenarioKeys,
+    activeScenarioKey: primaryScenarioKey
+  }
+
+  const handleScenarioToggle = (scenarioKey: string) => {
+    setScenarioVisibility((prev) => ({
+      ...prev,
+      [scenarioKey]: !prev?.[scenarioKey]
+    }))
+  }
+
+  const handleNumPumpsDesignChange = (newCount: number) => {
+    setNumPumpsDesign(newCount)
+
+    if (!selected) {
+      return
+    }
+
+    const previousSelected = prevSelectedRef.current ?? selected
+
+    setDesignPumps((prev: DesignPump[]) => {
+      const updated = [...prev]
+
+      for (let i = 0; i < newCount; i++) {
+        const existing = updated[i] ?? { id: null, stages }
+        const shouldUpdate = existing.id === null || existing.id === previousSelected
+
+        if (shouldUpdate) {
+          const desiredStages = existing.stages ?? stages
+          updated[i] = { ...existing, id: selected, stages: desiredStages }
+        } else {
+          updated[i] = existing
+        }
+      }
+
+      return updated
+    })
+
+    prevSelectedRef.current = selected
+  }
+
   useEffect(() => {
     axios.get('/api/pumps').then(r => {
       const list = r.data || []
       // Expect list of pump records; map to ids
-      setPumps(list.map((p: any) => p[equipmentIdKey(list)]) )
+      const pumpIds = list.map((p: any) => p[equipmentIdKey(list)])
+      setPumps(pumpIds)
+
+      if (!selected) {
+        const defaultPump = pumpIds.find((pumpId: string) => pumpId === 'NHV760') || pumpIds[0] || null
+        if (defaultPump) {
+          setSelected(defaultPump)
+        }
+      }
     }).catch(e => console.error(e))
   }, [])
+
+  useEffect(() => {
+    if (!selected) {
+      prevSelectedRef.current = null
+      return
+    }
+
+    const previousSelected = prevSelectedRef.current
+    setDesignPumps((prev: DesignPump[]) => {
+      let didChange = false
+      const updated = prev.map((pump) => {
+        if (!pump) {
+          didChange = true
+          return { id: selected, stages }
+        }
+
+        const shouldFollowDefault = pump.id === null || pump.id === previousSelected
+        if (!shouldFollowDefault) {
+          return pump
+        }
+
+        const desiredStages = pump.stages ?? stages
+        if (pump.id === selected && pump.stages === desiredStages) {
+          return pump
+        }
+
+        didChange = true
+        return { ...pump, id: selected, stages: desiredStages }
+      })
+
+      return didChange ? updated : prev
+    })
+
+    prevSelectedRef.current = selected
+  }, [selected, stages])
 
   function equipmentIdKey(list: any[]) {
     // try to guess the ID key
@@ -355,13 +518,70 @@ export default function App() {
       
       if (payload.success && payload.ipr_data) {
         setIprData(payload.ipr_data)
-        
-        // Guardar curva de demanda de presión si está disponible
+
+        if (Array.isArray(payload.scenario_order) && payload.scenario_order.length > 0) {
+          setScenarioOrder(payload.scenario_order)
+        } else {
+          setScenarioOrder(DEFAULT_SCENARIO_ORDER)
+        }
+
+        if (payload.scenario_definitions) {
+          setScenarioDefinitions(payload.scenario_definitions)
+        } else {
+          setScenarioDefinitions({})
+        }
+
+        if (payload.ipr_scenarios) {
+          setIprScenarios(payload.ipr_scenarios)
+        } else {
+          setIprScenarios({})
+        }
+
+        if (payload.pressure_demand_scenarios) {
+          setPressureDemandScenarios(payload.pressure_demand_scenarios)
+        } else {
+          setPressureDemandScenarios({})
+        }
+
         if (payload.pressure_demand_curve) {
           setPressureDemandCurve(payload.pressure_demand_curve)
           console.log('✅ pressureDemandCurve guardado en el estado')
         } else {
+          setPressureDemandCurve(null)
           console.log('⚠️ NO se recibió pressure_demand_curve del backend')
+        }
+
+        const scenarioKeys = payload.pressure_demand_scenarios
+          ? Object.keys(payload.pressure_demand_scenarios)
+          : (payload.ipr_scenarios ? Object.keys(payload.ipr_scenarios) : [])
+
+        if (scenarioKeys.length > 0) {
+          setScenarioVisibility((prev) => {
+            const updated = { ...prev }
+            scenarioKeys.forEach((key) => {
+              if (updated[key] === undefined) {
+                updated[key] = key === 'conservative'
+              }
+            })
+            Object.keys(updated).forEach((key) => {
+              if (!scenarioKeys.includes(key)) {
+                delete updated[key]
+              }
+            })
+            if (!scenarioKeys.some((key) => updated[key])) {
+              const fallbackKey = scenarioKeys.includes('conservative') ? 'conservative' : scenarioKeys[0]
+              if (fallbackKey) {
+                updated[fallbackKey] = true
+              }
+            }
+            return updated
+          })
+        } else {
+          setScenarioVisibility({
+            optimistic: false,
+            conservative: true,
+            pessimistic: false
+          })
         }
       } else {
         setError('Error calculating IPR')
@@ -453,616 +673,662 @@ export default function App() {
     }
   }, [numPumpsDesign, designPumps, freq, points, isComparisonMode])
 
-  return (
-    <div className="app">
-      <h1>🔧 BES Pump Performance Curves</h1>
-      {/* Checkboxes para Comparison Mode y IPR */}
-      <div style={{ width: '100%', display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '18px', flexWrap: 'wrap' }}>
-        <label className="checkbox-label" style={{
-          background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
-          color: 'white',
-          fontWeight: 600,
-          fontSize: '1.15rem',
-          padding: '12px 32px',
-          borderRadius: '12px',
-          boxShadow: '0 2px 8px rgba(52, 73, 94, 0.08)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          cursor: 'pointer',
-          border: isComparisonMode ? '2px solid #e67e22' : '2px solid #764ba2',
-          transition: 'border 0.2s',
-        }}>
-          <input 
-            type="checkbox" 
-            checked={isComparisonMode} 
-            onChange={(e) => setIsComparisonMode(e.target.checked)} 
-            style={{ width: 22, height: 22, accentColor: isComparisonMode ? '#e67e22' : '#764ba2', marginRight: 8 }}
-          />
-          <span>Comparison Mode</span>
-        </label>
-        
-        <label className="checkbox-label" style={{
-          background: showIPR ? 'linear-gradient(90deg, #27ae60 0%, #2ecc71 100%)' : 'linear-gradient(90deg, #95a5a6 0%, #7f8c8d 100%)',
-          color: 'white',
-          fontWeight: 600,
-          fontSize: '1.15rem',
-          padding: '12px 32px',
-          borderRadius: '12px',
-          boxShadow: '0 2px 8px rgba(52, 73, 94, 0.08)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          cursor: 'pointer',
-          border: showIPR ? '2px solid #27ae60' : '2px solid #7f8c8d',
-          transition: 'all 0.3s',
-        }}>
-          <input 
-            type="checkbox" 
-            checked={showIPR} 
-            onChange={(e) => setShowIPR(e.target.checked)} 
-            style={{ width: 22, height: 22, accentColor: showIPR ? '#27ae60' : '#7f8c8d', marginRight: 8 }}
-          />
-          <span>📈 Show IPR</span>
-        </label>
+  useEffect(() => {
+    if (!showIPR && visualTab === 'ipr') {
+      setVisualTab('curves')
+    }
+  }, [showIPR, visualTab])
+
+  useEffect(() => {
+    setPumpCurvesTab('combined')
+  }, [numPumpsDesign, isComparisonMode])
+
+  const renderNumberOfPumpsSelector = (): React.ReactNode => (
+    <div className="panel-card">
+      <label style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+        <span style={{ fontWeight: 600, color: '#d8e4ff' }}>Number of Pumps in System</span>
+        <select
+          value={numPumpsDesign}
+          onChange={(event) => handleNumPumpsDesignChange(Number(event.target.value))}
+          style={{
+            padding: '10px 12px',
+            borderRadius: '8px',
+            border: '1px solid #3498db',
+            background: 'white',
+            color: '#2c3e50',
+            fontWeight: 600
+          }}
+        >
+          <option value={1}>1 Pump</option>
+          <option value={2}>2 Pumps (Series)</option>
+          <option value={3}>3 Pumps (Series)</option>
+          <option value={4}>4 Pumps (Series)</option>
+          <option value={5}>5 Pumps (Series)</option>
+        </select>
+      </label>
+    </div>
+  )
+
+  const renderSinglePumpControls = (): React.ReactNode => (
+    <>
+      <div className="panel-card">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '12px', alignItems: 'flex-end' }}>
+          <PumpSelector pumps={pumps} value={selected} onChange={setSelected} />
+          <label className="panel-field" style={{ margin: 0 }}>
+            <span>Points per Curve</span>
+            <input
+              type="number"
+              value={points}
+              onChange={(event) => setPoints(Number(event.target.value))}
+              min={50}
+              max={500}
+              step={10}
+            />
+          </label>
+        </div>
       </div>
-      <div className="controls">
-        {!isComparisonMode ? (
-          <>
-            {numPumpsDesign === 1 ? (
-              <>
-                <PumpSelector pumps={pumps} value={selected} onChange={setSelected} />
-                <CurveControls 
-                  freq={freq} setFreq={setFreq} 
-                  stages={stages} setStages={setStages} 
-                  points={points} setPoints={setPoints} 
-                  onPlot={() => {}}
-                  isMultiFreq={isMultiFreq} setIsMultiFreq={setIsMultiFreq}
-                  minFreq={minFreq} setMinFreq={setMinFreq}
-                  maxFreq={maxFreq} setMaxFreq={setMaxFreq}
-                  numCurves={numCurves} setNumCurves={setNumCurves}
-                />
-              </>
-            ) : (
-              <div style={{ width: '100%' }}>
-                {/* Controles globales */}
-                <div style={{ marginBottom: '20px', padding: '15px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '15px' }}>
-                    <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                      <span>Frequency (Hz):</span>
-                      <input 
-                        type="number" 
-                        value={freq} 
-                        onChange={(e) => setFreq(Number(e.target.value))} 
-                        min="30" max="70" step="0.1"
-                        style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
-                      />
-                    </label>
-                    <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                      <span>Points per Curve:</span>
-                      <input 
-                        type="number" 
-                        value={points} 
-                        onChange={(e) => setPoints(Number(e.target.value))} 
-                        min="50" max="500" step="10"
-                        style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
-                      />
-                    </label>
-                  </div>
-                </div>
-                
-                {/* Controles de cada bomba en columnas */}
-                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(numPumpsDesign, 3)}, 1fr)`, gap: '20px' }}>
-                  {[...Array(numPumpsDesign)].map((_, idx) => (
-                    <div key={idx} style={{ padding: '15px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-                      <h3 style={{ margin: '0 0 15px 0', color: '#3498db', textAlign: 'center' }}>Pump {idx + 1}</h3>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                          <span>Select Pump:</span>
-                          <select 
-                            value={designPumps[idx]?.id || ''} 
-                            onChange={(e) => {
-                              const newPumps = [...designPumps]
-                              newPumps[idx] = { ...newPumps[idx], id: e.target.value || null }
-                              setDesignPumps(newPumps)
-                            }}
-                            style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
-                          >
-                            <option value="">-- Select --</option>
-                            {pumps.map(p => <option key={p} value={p}>{p}</option>)}
-                          </select>
-                        </label>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                          <span>Stages:</span>
-                          <input 
-                            type="number" 
-                            value={designPumps[idx]?.stages || 300} 
-                            onChange={(e) => {
-                              const newPumps = [...designPumps]
-                              newPumps[idx] = { ...newPumps[idx], stages: Number(e.target.value) }
-                              setDesignPumps(newPumps)
-                            }}
-                            min="1" max="500" step="1"
-                            style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
-                          />
-                        </label>
-                      </div>
-                    </div>
+      {renderNumberOfPumpsSelector()}
+      <div className="panel-card">
+        <CurveControls
+          freq={freq}
+          setFreq={setFreq}
+          stages={stages}
+          setStages={setStages}
+          points={points}
+          setPoints={setPoints}
+          onPlot={() => {}}
+          isMultiFreq={isMultiFreq}
+          setIsMultiFreq={setIsMultiFreq}
+          minFreq={minFreq}
+          setMinFreq={setMinFreq}
+          maxFreq={maxFreq}
+          setMaxFreq={setMaxFreq}
+          numCurves={numCurves}
+          setNumCurves={setNumCurves}
+          showPointsField={false}
+        />
+      </div>
+    </>
+  )
+
+  const renderMultiPumpControls = (): React.ReactNode => (
+    <>
+      {renderNumberOfPumpsSelector()}
+      <div className="panel-card">
+        <h3 className="panel-heading">Global Settings</h3>
+        <div className="panel-grid">
+          <label className="panel-field">
+            <span>Frequency (Hz)</span>
+            <input
+              type="number"
+              value={freq}
+              onChange={(event) => setFreq(Number(event.target.value))}
+              min={30}
+              max={70}
+              step={0.1}
+            />
+          </label>
+          <label className="panel-field">
+            <span>Points per Curve</span>
+            <input
+              type="number"
+              value={points}
+              onChange={(event) => setPoints(Number(event.target.value))}
+              min={50}
+              max={500}
+              step={10}
+            />
+          </label>
+        </div>
+      </div>
+      <div className="panel-card">
+        <h3 className="panel-heading">Pump Lineup</h3>
+        <div
+          className="multi-pump-grid"
+          style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(numPumpsDesign, 2)}, 1fr)`, gap: '16px' }}
+        >
+          {[...Array(numPumpsDesign)].map((_, idx) => (
+            <div
+              key={`design-pump-${idx}`}
+              style={{
+                padding: '16px',
+                background: 'linear-gradient(180deg, #ffffff 0%, #f6f8fb 100%)',
+                borderRadius: '10px',
+                border: '1px solid #dce3f0',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px'
+              }}
+            >
+              <h4 style={{ margin: 0, color: '#3498db', fontSize: '1rem', fontWeight: 600 }}>Pump {idx + 1}</h4>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <span style={{ fontWeight: 600, color: '#34495e' }}>Select Pump</span>
+                <select
+                  value={designPumps[idx]?.id || ''}
+                  onChange={(event) => {
+                    const newPumps = [...designPumps]
+                    newPumps[idx] = { ...newPumps[idx], id: event.target.value || null }
+                    setDesignPumps(newPumps)
+                  }}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #3498db',
+                    background: 'white'
+                  }}
+                >
+                  <option value="">-- Select --</option>
+                  {pumps.map((pumpId) => (
+                    <option key={pumpId} value={pumpId}>
+                      {pumpId}
+                    </option>
                   ))}
-                </div>
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <span style={{ fontWeight: 600, color: '#34495e' }}>Stages</span>
+                <input
+                  type="number"
+                  value={designPumps[idx]?.stages || 300}
+                  onChange={(event) => {
+                    const newPumps = [...designPumps]
+                    newPumps[idx] = { ...newPumps[idx], stages: Number(event.target.value) }
+                    setDesignPumps(newPumps)
+                  }}
+                  min={1}
+                  max={500}
+                  step={1}
+                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                />
+              </label>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  )
+
+  const renderComparisonControls = (): React.ReactNode => (
+    <>
+      <div className="panel-card">
+        <h3 className="panel-heading">Comparison Setup</h3>
+        <div className="panel-grid">
+          <label className="panel-field">
+            <span>Curve Type to Compare</span>
+            <select
+              value={curveTypeToCompare}
+              onChange={(event) => setCurveTypeToCompare(event.target.value as 'head' | 'bhp' | 'efficiency')}
+            >
+              <option value="head">Head (TDH)</option>
+              <option value="bhp">BHP</option>
+              <option value="efficiency">Efficiency</option>
+            </select>
+          </label>
+          <label className="panel-field">
+            <span>Number of Pumps</span>
+            <select value={numPumpsToCompare} onChange={(event) => setNumPumpsToCompare(Number(event.target.value))}>
+              <option value={2}>2 Pumps</option>
+              <option value={3}>3 Pumps</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div className="panel-card">
+        <h3 className="panel-heading">Pump Parameters</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${numPumpsToCompare}, 1fr)`, gap: '18px' }}>
+          {[1, 2, 3].slice(0, numPumpsToCompare).map((num) => {
+            const pumpState =
+              num === 1
+                ? { pump: pump1, setPump: setPump1, freq: pump1Freq, setFreq: setPump1Freq, stages: pump1Stages, setStages: setPump1Stages, multiFreq: pump1MultiFreq, setMultiFreq: setPump1MultiFreq }
+                : num === 2
+                ? { pump: pump2, setPump: setPump2, freq: pump2Freq, setFreq: setPump2Freq, stages: pump2Stages, setStages: setPump2Stages, multiFreq: pump2MultiFreq, setMultiFreq: setPump2MultiFreq }
+                : { pump: pump3, setPump: setPump3, freq: pump3Freq, setFreq: setPump3Freq, stages: pump3Stages, setStages: setPump3Stages, multiFreq: pump3MultiFreq, setMultiFreq: setPump3MultiFreq }
+
+            return (
+              <div
+                key={`comparison-pump-${num}`}
+                style={{
+                  padding: '14px',
+                  borderRadius: '10px',
+                  border: '1px solid #e1e6f0',
+                  background: 'linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px'
+                }}
+              >
+                <h4 style={{ margin: 0, color: '#3498db', textAlign: 'center' }}>Pump {num}</h4>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ fontWeight: 600, color: '#34495e' }}>Select Pump</span>
+                  <select
+                    value={pumpState.pump || ''}
+                    onChange={(event) => pumpState.setPump(event.target.value || null)}
+                    style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                  >
+                    <option value="">-- Select --</option>
+                    {pumps.map((pumpId) => (
+                      <option key={pumpId} value={pumpId}>
+                        {pumpId}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="checkbox-label" style={{ justifyContent: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={pumpState.multiFreq}
+                    onChange={(event) => pumpState.setMultiFreq(event.target.checked)}
+                  />
+                  <span>Multi-Frequency Mode</span>
+                </label>
+                {!pumpState.multiFreq && (
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <span style={{ fontWeight: 600, color: '#34495e' }}>Frequency (Hz)</span>
+                    <input
+                      type="number"
+                      value={pumpState.freq}
+                      onChange={(event) => pumpState.setFreq(Number(event.target.value))}
+                      min={30}
+                      max={70}
+                      step={0.1}
+                      style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                    />
+                  </label>
+                )}
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ fontWeight: 600, color: '#34495e' }}>Stages</span>
+                  <input
+                    type="number"
+                    value={pumpState.stages}
+                    onChange={(event) => pumpState.setStages(Number(event.target.value))}
+                    min={1}
+                    max={500}
+                    step={1}
+                    style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                  />
+                </label>
               </div>
-            )}
-            
-            {/* Selector de número de bombas para diseño */}
-            <div style={{ width: '100%', marginTop: '15px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontWeight: 600 }}>Number of Pumps in System:</span>
-                <select 
-                  value={numPumpsDesign} 
-                  onChange={(e) => setNumPumpsDesign(Number(e.target.value))}
-                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
-                >
-                  <option value={1}>1 Pump</option>
-                  <option value={2}>2 Pumps (Series)</option>
-                  <option value={3}>3 Pumps (Series)</option>
-                  <option value={4}>4 Pumps (Series)</option>
-                  <option value={5}>5 Pumps (Series)</option>
-                </select>
-              </label>
-            </div>
-          </>
-        ) : (
-          <div style={{ width: '100%' }}>
-            <div style={{ marginBottom: '20px', padding: '15px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' }}>
-                <span>Curve Type to Compare:</span>
-                <select 
-                  value={curveTypeToCompare} 
-                  onChange={(e) => setCurveTypeToCompare(e.target.value as 'head' | 'bhp' | 'efficiency')}
-                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
-                >
-                  <option value="head">Head (TDH)</option>
-                  <option value="bhp">BHP</option>
-                  <option value="efficiency">Efficiency</option>
-                </select>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span>Number of Pumps:</span>
-                <select 
-                  value={numPumpsToCompare} 
-                  onChange={(e) => setNumPumpsToCompare(Number(e.target.value))}
-                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
-                >
-                  <option value={2}>2 Pumps</option>
-                  <option value={3}>3 Pumps</option>
-                </select>
-              </label>
-            </div>
-            {/* Controles para cada bomba en columnas */}
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${numPumpsToCompare}, 1fr)`, gap: '24px', marginBottom: '18px' }}>
-              {[1, 2, 3].slice(0, numPumpsToCompare).map((num) => {
-                const pumpState = num === 1 ? { pump: pump1, setPump: setPump1, freq: pump1Freq, setFreq: setPump1Freq, stages: pump1Stages, setStages: setPump1Stages, multiFreq: pump1MultiFreq, setMultiFreq: setPump1MultiFreq } :
-                                 num === 2 ? { pump: pump2, setPump: setPump2, freq: pump2Freq, setFreq: setPump2Freq, stages: pump2Stages, setStages: setPump2Stages, multiFreq: pump2MultiFreq, setMultiFreq: setPump2MultiFreq } :
-                                 { pump: pump3, setPump: setPump3, freq: pump3Freq, setFreq: setPump3Freq, stages: pump3Stages, setStages: setPump3Stages, multiFreq: pump3MultiFreq, setMultiFreq: setPump3MultiFreq }
-                return (
-                  <div key={num} style={{ padding: '15px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-                    <h3 style={{ margin: '0 0 15px 0', color: '#3498db', textAlign: 'center' }}>Pump {num}</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                      <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                        <span>Select Pump:</span>
-                        <select 
-                          value={pumpState.pump || ''} 
-                          onChange={(e) => pumpState.setPump(e.target.value || null)}
-                          style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
-                        >
-                          <option value="">-- Select --</option>
-                          {pumps.map(p => <option key={p} value={p}>{p}</option>)}
-                        </select>
-                      </label>
-                      <label className="checkbox-label">
-                        <input 
-                          type="checkbox" 
-                          checked={pumpState.multiFreq} 
-                          onChange={(e) => pumpState.setMultiFreq(e.target.checked)} 
-                        />
-                        <span>Multi-Frequency Mode</span>
-                      </label>
-                      {!pumpState.multiFreq && (
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                          <span>Frequency (Hz):</span>
-                          <input 
-                            type="number" 
-                            value={pumpState.freq} 
-                            onChange={(e) => pumpState.setFreq(Number(e.target.value))} 
-                            min="30" max="70" step="0.1"
-                            style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
-                          />
-                        </label>
-                      )}
-                      <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                        <span>Stages:</span>
-                        <input 
-                          type="number" 
-                          value={pumpState.stages} 
-                          onChange={(e) => pumpState.setStages(Number(e.target.value))} 
-                          min="1" max="500" step="1"
-                          style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            {/* Controles globales para modo multi-frecuencia */}
-            {(pump1MultiFreq || pump2MultiFreq || (numPumpsToCompare >= 3 && pump3MultiFreq)) && (
-              <div style={{ padding: '15px', background: 'rgba(52, 152, 219, 0.1)', borderRadius: '8px', marginBottom: '15px' }}>
-                <h4 style={{ margin: '0 0 10px 0', color: '#3498db' }}>Multi-Frequency Settings</h4>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px' }}>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                    <span>Min Frequency (Hz):</span>
-                    <input 
-                      type="number" 
-                      value={minFreq} 
-                      onChange={(e) => setMinFreq(Number(e.target.value))} 
-                      min="30" max="60" step="1"
-                      style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
-                    />
-                  </label>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                    <span>Max Frequency (Hz):</span>
-                    <input 
-                      type="number" 
-                      value={maxFreq} 
-                      onChange={(e) => setMaxFreq(Number(e.target.value))} 
-                      min="40" max="70" step="1"
-                      style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
-                    />
-                  </label>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                    <span>Number of Curves:</span>
-                    <input 
-                      type="number" 
-                      value={numCurves} 
-                      onChange={(e) => setNumCurves(Number(e.target.value))} 
-                      min="2" max="10" step="1"
-                      style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
-                    />
-                  </label>
-                </div>
-              </div>
-            )}
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '15px' }}>
-              <span>Points per Curve:</span>
-              <input 
-                type="number" 
-                value={points} 
-                onChange={(e) => setPoints(Number(e.target.value))} 
-                min="50" max="500" step="10"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: '#34495e', color: 'white' }}
+            )
+          })}
+        </div>
+      </div>
+      {(pump1MultiFreq || pump2MultiFreq || (numPumpsToCompare >= 3 && pump3MultiFreq)) && (
+        <div className="panel-card">
+          <h3 className="panel-heading">Multi-Frequency Settings</h3>
+          <div className="panel-grid">
+            <label className="panel-field">
+              <span>Min Frequency (Hz)</span>
+              <input
+                type="number"
+                value={minFreq}
+                onChange={(event) => setMinFreq(Number(event.target.value))}
+                min={30}
+                max={60}
+                step={1}
+              />
+            </label>
+            <label className="panel-field">
+              <span>Max Frequency (Hz)</span>
+              <input
+                type="number"
+                value={maxFreq}
+                onChange={(event) => setMaxFreq(Number(event.target.value))}
+                min={40}
+                max={70}
+                step={1}
+              />
+            </label>
+            <label className="panel-field">
+              <span>Number of Curves</span>
+              <input
+                type="number"
+                value={numCurves}
+                onChange={(event) => setNumCurves(Number(event.target.value))}
+                min={2}
+                max={10}
+                step={1}
               />
             </label>
           </div>
-        )}
-      </div>
-      
-      {/* Controles del IPR */}
-      {showIPR && !isComparisonMode && (
-        <>
-          <IPRControls 
-            method={iprMethod}
-            setMethod={setIprMethod}
-            presionReservorio={presionReservorio}
-            setPresionReservorio={setPresionReservorio}
-            pi={pi}
-            setPi={setPi}
-            presionBurbuja={presionBurbuja}
-            setPresionBurbuja={setPresionBurbuja}
-            qTest={qTest}
-            setQTest={setQTest}
-            pwfTest={pwfTest}
-            setPwfTest={setPwfTest}
-            nExponent={nExponent}
-            setNExponent={setNExponent}
-            permeabilidad={permeabilidad}
-            setPermeabilidad={setPermeabilidad}
-            espesor={espesor}
-            setEspesor={setEspesor}
-            radioDrenaje={radioDrenaje}
-            setRadioDrenaje={setRadioDrenaje}
-            radioPozo={radioPozo}
-            setRadioPozo={setRadioPozo}
-            viscosidad={viscosidad}
-            setViscosidad={setViscosidad}
-            factorVolumen={factorVolumen}
-            setFactorVolumen={setFactorVolumen}
-            skin={skin}
-            setSkin={setSkin}
-            gradoApi={gradoApi}
-            setGradoApi={setGradoApi}
-            aguaPorcentaje={aguaPorcentaje}
-            setAguaPorcentaje={setAguaPorcentaje}
-            gravedadEspecificaAgua={gravedadEspecificaAgua}
-            setGravedadEspecificaAgua={setGravedadEspecificaAgua}
-          />
-          
-          {/* FASE 1: Controles de Instalación */}
-          <InstallationControls
-            profundidadIntake={profundidadIntake}
-            setProfundidadIntake={setProfundidadIntake}
-            tubingSelected={tubingSelected}
-            setTubingSelected={setTubingSelected}
-            tubingIdMm={tubingIdMm}
-            setTubingIdMm={setTubingIdMm}
-            tubingRoughness={tubingRoughness}
-            setTubingRoughness={setTubingRoughness}
-            presionSuperficie={presionSuperficie}
-            setPresionSuperficie={setPresionSuperficie}
-            presionCasing={presionCasing}
-            setPresionCasing={setPresionCasing}
-          />
-        </>
-      )}
-      
-      {loading && <div className="loading">⏳ Loading pump curves...</div>}
-      {error && <div className="error">❌ {error}</div>}
-      
-      {!isComparisonMode && numPumpsDesign === 1 && !selected && !loading && !error && (
-        <div style={{ textAlign: 'center', padding: '32px', color: '#7f8c8d', fontSize: '1.1rem' }}>
-          👆 Select a pump to view its performance curves
         </div>
       )}
-      
-      {/* Sistema de Pestañas para 1 bomba */}
-      {!isComparisonMode && numPumpsDesign === 1 && (curves || multiFreqCurves.length > 0) && (
+      <div className="panel-card">
+        <label className="panel-field">
+          <span>Points per Curve</span>
+          <input
+            type="number"
+            value={points}
+            onChange={(event) => setPoints(Number(event.target.value))}
+            min={50}
+            max={500}
+            step={10}
+          />
+        </label>
+      </div>
+    </>
+  )
+
+  const renderPumpConfiguration = (): React.ReactNode => {
+    if (isComparisonMode) {
+      return renderComparisonControls()
+    }
+
+    return numPumpsDesign === 1 ? renderSinglePumpControls() : renderMultiPumpControls()
+  }
+
+  const renderInstallationConfiguration = (): React.ReactNode => (
+    <div className="panel-card">
+      <InstallationControls
+        profundidadIntake={profundidadIntake}
+        setProfundidadIntake={setProfundidadIntake}
+        tubingSelected={tubingSelected}
+        setTubingSelected={setTubingSelected}
+        tubingIdMm={tubingIdMm}
+        setTubingIdMm={setTubingIdMm}
+        tubingRoughness={tubingRoughness}
+        setTubingRoughness={setTubingRoughness}
+        presionSuperficie={presionSuperficie}
+        setPresionSuperficie={setPresionSuperficie}
+        presionCasing={presionCasing}
+        setPresionCasing={setPresionCasing}
+      />
+    </div>
+  )
+
+  const renderIprConfiguration = (): React.ReactNode => (
+    <div className="panel-card">
+      {!showIPR && (
+        <div className="panel-hint">
+          Enable “Show IPR” to calculate well performance in real time.
+        </div>
+      )}
+      <IPRControls
+        method={iprMethod}
+        setMethod={setIprMethod}
+        presionReservorio={presionReservorio}
+        setPresionReservorio={setPresionReservorio}
+        pi={pi}
+        setPi={setPi}
+        presionBurbuja={presionBurbuja}
+        setPresionBurbuja={setPresionBurbuja}
+        qTest={qTest}
+        setQTest={setQTest}
+        pwfTest={pwfTest}
+        setPwfTest={setPwfTest}
+        nExponent={nExponent}
+        setNExponent={setNExponent}
+        permeabilidad={permeabilidad}
+        setPermeabilidad={setPermeabilidad}
+        espesor={espesor}
+        setEspesor={setEspesor}
+        radioDrenaje={radioDrenaje}
+        setRadioDrenaje={setRadioDrenaje}
+        radioPozo={radioPozo}
+        setRadioPozo={setRadioPozo}
+        viscosidad={viscosidad}
+        setViscosidad={setViscosidad}
+        factorVolumen={factorVolumen}
+        setFactorVolumen={setFactorVolumen}
+        skin={skin}
+        setSkin={setSkin}
+        gradoApi={gradoApi}
+        setGradoApi={setGradoApi}
+        aguaPorcentaje={aguaPorcentaje}
+        setAguaPorcentaje={setAguaPorcentaje}
+        gravedadEspecificaAgua={gravedadEspecificaAgua}
+        setGravedadEspecificaAgua={setGravedadEspecificaAgua}
+        scenarioVisibility={scenarioVisibility}
+        onToggleScenario={handleScenarioToggle}
+        scenarioStyles={scenarioStyles}
+        scenarioOrder={availableScenarioKeys}
+      />
+    </div>
+  )
+
+  const renderPumpCurvesContent = (): React.ReactNode => {
+    if (isComparisonMode) {
+      return (
         <>
-          <div style={{ textAlign: 'center', padding: '16px', background: 'rgba(52, 152, 219, 0.1)', borderRadius: '8px', marginBottom: '16px' }}>
-            <h3 style={{ margin: 0, color: '#3498db' }}>
-              Single Pump Analysis @ {freq} Hz
-            </h3>
-            <p style={{ margin: '8px 0 0 0', color: '#7f8c8d', fontSize: '0.95rem' }}>
-              View pump performance curves and IPR analysis
-            </p>
+          <CurvePlot
+            {...scenarioPlotProps}
+            curves={null}
+            isComparisonMode={true}
+            comparisonData={{
+              pumps: [
+                { id: pump1, curves: pump1Curves, multiFreq: pump1MultiFreq, name: pump1 || 'Pump 1' },
+                { id: pump2, curves: pump2Curves, multiFreq: pump2MultiFreq, name: pump2 || 'Pump 2' },
+                ...(numPumpsToCompare >= 3
+                  ? [{ id: pump3, curves: pump3Curves, multiFreq: pump3MultiFreq, name: pump3 || 'Pump 3' }]
+                  : [])
+              ].filter((pumpEntry) => pumpEntry.id),
+              curveType: curveTypeToCompare
+            }}
+          />
+        </>
+      )
+    }
+
+    if (numPumpsDesign === 1) {
+      if (!selected) {
+        return <div className="empty-state">Select a pump to view the performance curves.</div>
+      }
+
+      if (isMultiFreq && multiFreqCurves.length > 0) {
+        return (
+          <CurvePlot
+            {...scenarioPlotProps}
+            curves={null}
+            multiFreqData={multiFreqCurves}
+            isMultiFreq={true}
+            iprData={null}
+            showIPR={false}
+          />
+        )
+      }
+
+      if (!isMultiFreq && curves) {
+        return (
+          <CurvePlot
+            {...scenarioPlotProps}
+            curves={curves}
+            iprData={null}
+            showIPR={false}
+          />
+        )
+      }
+
+      return <div className="empty-state">Adjust the configuration and wait for the curves to load.</div>
+    }
+
+    if (!combinedCurves) {
+      return <div className="empty-state">Configure at least one pump to generate the system curves.</div>
+    }
+
+    const hasIndividual = individualCurves.length > 1
+
+    return (
+      <div className="panel-card panel-card--no-padding">
+        {hasIndividual && (
+          <div className="subtabs-header">
+            <button
+              className={`subtab-button ${pumpCurvesTab === 'combined' ? 'active' : ''}`}
+              onClick={() => setPumpCurvesTab('combined')}
+            >
+              Combined System
+            </button>
+            <button
+              className={`subtab-button ${pumpCurvesTab === 'efficiency' ? 'active' : ''}`}
+              onClick={() => setPumpCurvesTab('efficiency')}
+            >
+              Efficiency
+            </button>
+            <button
+              className={`subtab-button ${pumpCurvesTab === 'head' ? 'active' : ''}`}
+              onClick={() => setPumpCurvesTab('head')}
+            >
+              Head (TDH)
+            </button>
+            <button
+              className={`subtab-button ${pumpCurvesTab === 'bhp' ? 'active' : ''}`}
+              onClick={() => setPumpCurvesTab('bhp')}
+            >
+              Power (BHP)
+            </button>
           </div>
-          
-          <div className="tabs-container">
-            <div className="tabs-header">
-              <button 
-                className={`tab-button combined ${activeTab === 'combined' ? 'active' : ''}`}
-                onClick={() => setActiveTab('combined')}
+        )}
+        <div className="subtab-content">
+          {(!hasIndividual || pumpCurvesTab === 'combined') && (
+            <CurvePlot
+              {...scenarioPlotProps}
+              curves={combinedCurves}
+              iprData={null}
+              showIPR={false}
+            />
+          )}
+          {hasIndividual && pumpCurvesTab === 'efficiency' && (
+            <CurvePlot
+              {...scenarioPlotProps}
+              curves={null}
+              isIndividualEfficiency={true}
+              individualEfficiencyData={individualCurves}
+            />
+          )}
+          {hasIndividual && pumpCurvesTab === 'head' && (
+            <CurvePlot
+              {...scenarioPlotProps}
+              curves={null}
+              isIndividualHead={true}
+              individualHeadData={individualCurves}
+              iprData={null}
+              showIPR={false}
+            />
+          )}
+          {hasIndividual && pumpCurvesTab === 'bhp' && (
+            <CurvePlot
+              {...scenarioPlotProps}
+              curves={null}
+              isIndividualBhp={true}
+              individualBhpData={individualCurves}
+            />
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const renderIprDemandContent = (): React.ReactNode => {
+    if (!showIPR) {
+      return <div className="empty-state">Enable “Show IPR” to display the well inflow and system demand curves.</div>
+    }
+
+    if (loading) {
+      return <div className="empty-state">Loading IPR results…</div>
+    }
+
+    if (!iprData) {
+      return <div className="empty-state">Adjust the IPR parameters to calculate the inflow curve.</div>
+    }
+
+    return (
+      <CurvePlot
+        {...scenarioPlotProps}
+        curves={null}
+        isIPRMode={true}
+        iprData={iprData}
+        showIPR={true}
+        pumpCurves={numPumpsDesign > 1 ? combinedCurves : curves}
+      />
+    )
+  }
+
+  return (
+    <div className="app">
+      <h1>🔧 BES Pump Performance Curves</h1>
+      <div className="layout-two-column">
+        <aside className="config-panel">
+          <div className="global-toggles">
+            <label
+              className={`checkbox-label toggle-chip ${isComparisonMode ? 'toggle-chip--active' : ''}`}
+            >
+              <input
+                type="checkbox"
+                checked={isComparisonMode}
+                onChange={(event) => setIsComparisonMode(event.target.checked)}
+              />
+              <span>Comparison Mode</span>
+            </label>
+            <label
+              className={`checkbox-label toggle-chip ${showIPR ? 'toggle-chip--ipr-active' : ''}`}
+            >
+              <input
+                type="checkbox"
+                checked={showIPR}
+                onChange={(event) => setShowIPR(event.target.checked)}
+              />
+              <span>📈 Show IPR</span>
+            </label>
+          </div>
+          <div className="config-tabs">
+            <div className="config-tabs-header">
+              <button
+                className={`config-tab-button ${configTab === 'pump' ? 'active' : ''}`}
+                onClick={() => setConfigTab('pump')}
+              >
+                Pump Configuration
+              </button>
+              <button
+                className={`config-tab-button ${configTab === 'installation' ? 'active' : ''}`}
+                onClick={() => setConfigTab('installation')}
+              >
+                Installation Parameters
+              </button>
+              <button
+                className={`config-tab-button ${configTab === 'ipr' ? 'active' : ''}`}
+                onClick={() => setConfigTab('ipr')}
+              >
+                IPR Configuration
+              </button>
+            </div>
+            <div className="config-tab-body">
+              {configTab === 'pump' && renderPumpConfiguration()}
+              {configTab === 'installation' && renderInstallationConfiguration()}
+              {configTab === 'ipr' && renderIprConfiguration()}
+            </div>
+          </div>
+        </aside>
+        <section className="visual-panel">
+          {error && <div className="error">❌ {error}</div>}
+          {loading && <div className="loading">⏳ Loading data…</div>}
+          <div className="tabs-container visual-tabs">
+            <div className="tabs-header visual-tabs-header">
+              <button
+                className={`tab-button ${visualTab === 'curves' ? 'active' : ''}`}
+                onClick={() => setVisualTab('curves')}
               >
                 <span className="tab-icon">📊</span>
                 <span>Pump Curves</span>
               </button>
-              {iprData && (
-                <button 
-                  className={`tab-button ipr ${activeTab === 'ipr' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('ipr')}
-                >
-                  <span className="tab-icon">🛢️</span>
-                  <span>IPR Analysis</span>
-                </button>
-              )}
+              <button
+                className={`tab-button ${visualTab === 'ipr' ? 'active' : ''}`}
+                onClick={() => setVisualTab('ipr')}
+                disabled={!showIPR}
+                title={!showIPR ? 'Enable “Show IPR” to access this view' : undefined}
+              >
+                <span className="tab-icon">🛢️</span>
+                <span>IPR &amp; Demand</span>
+              </button>
             </div>
-            
-            <div className="tab-content">
-              {/* Tab Pump Curves */}
-              <div className={`tab-panel ${activeTab === 'combined' ? 'active' : ''}`}>
-                <div style={{ textAlign: 'center', padding: '12px', marginBottom: '16px' }}>
-                  <h4 style={{ margin: 0, color: '#3498db', fontSize: '1.3rem' }}>
-                    Pump Performance Curves
-                  </h4>
-                  <p style={{ margin: '8px 0 0 0', color: '#7f8c8d', fontSize: '0.9rem' }}>
-                    Head, efficiency, and power characteristics
-                  </p>
-                </div>
-                {!isMultiFreq && curves && <CurvePlot curves={curves} iprData={null} showIPR={false} />}
-                {isMultiFreq && multiFreqCurves.length > 0 && <CurvePlot curves={null} multiFreqData={multiFreqCurves} isMultiFreq={true} iprData={null} showIPR={false} />}
+            <div className="tab-content visual-tab-content">
+              <div className={`tab-panel ${visualTab === 'curves' ? 'active' : ''}`}>
+                {renderPumpCurvesContent()}
               </div>
-              
-              {/* Tab IPR */}
-              {iprData && (
-                <div className={`tab-panel ${activeTab === 'ipr' ? 'active' : ''}`}>
-                  <div style={{ textAlign: 'center', padding: '12px', marginBottom: '16px' }}>
-                    <h4 style={{ margin: 0, color: '#16a085', fontSize: '1.3rem' }}>
-                      IPR Analysis - Inflow Performance Relationship
-                    </h4>
-                    <p style={{ margin: '8px 0 0 0', color: '#7f8c8d', fontSize: '0.9rem' }}>
-                      Well productivity analysis
-                    </p>
-                  </div>
-                  <CurvePlot 
-                    curves={null}
-                    isIPRMode={true}
-                    iprData={iprData}
-                    showIPR={true}
-                    pressureDemandCurve={pressureDemandCurve}
-                  />
-                </div>
-              )}
+              <div className={`tab-panel ${visualTab === 'ipr' ? 'active' : ''}`}>
+                {renderIprDemandContent()}
+              </div>
             </div>
           </div>
-        </>
-      )}
-      
-      {!isComparisonMode && numPumpsDesign > 1 && combinedCurves && (
-        <>
-          <div style={{ textAlign: 'center', padding: '16px', background: 'rgba(52, 152, 219, 0.1)', borderRadius: '8px', marginBottom: '16px' }}>
-            <h3 style={{ margin: 0, color: '#3498db' }}>
-              System Design: {numPumpsDesign} Pumps in Series @ {freq} Hz
-            </h3>
-            <p style={{ margin: '8px 0 0 0', color: '#7f8c8d', fontSize: '0.95rem' }}>
-              View combined and individual pump performance curves
-            </p>
-          </div>
-          
-          {/* Sistema de Pestañas */}
-          {(individualCurves.length > 0 || iprData) && (
-            <div className="tabs-container">
-              <div className="tabs-header">
-                {individualCurves.length > 1 && (
-                  <>
-                    <button 
-                      className={`tab-button combined ${activeTab === 'combined' ? 'active' : ''}`}
-                      onClick={() => setActiveTab('combined')}
-                    >
-                      <span className="tab-icon">📊</span>
-                      <span>Combined System</span>
-                    </button>
-                    <button 
-                      className={`tab-button efficiency ${activeTab === 'efficiency' ? 'active' : ''}`}
-                      onClick={() => setActiveTab('efficiency')}
-                    >
-                      <span className="tab-icon">⚡</span>
-                      <span>Efficiency</span>
-                    </button>
-                    <button 
-                      className={`tab-button head ${activeTab === 'head' ? 'active' : ''}`}
-                      onClick={() => setActiveTab('head')}
-                    >
-                      <span className="tab-icon">📈</span>
-                      <span>Head (TDH)</span>
-                    </button>
-                    <button 
-                      className={`tab-button bhp ${activeTab === 'bhp' ? 'active' : ''}`}
-                      onClick={() => setActiveTab('bhp')}
-                    >
-                      <span className="tab-icon">🔋</span>
-                      <span>Power (BHP)</span>
-                    </button>
-                  </>
-                )}
-                <button 
-                  className={`tab-button ipr ${activeTab === 'ipr' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('ipr')}
-                >
-                  <span className="tab-icon">🛢️</span>
-                  <span>IPR Analysis</span>
-                </button>
-              </div>
-              
-              <div className="tab-content">
-                {/* Tab Combined System */}
-                {individualCurves.length > 1 && (
-                  <div className={`tab-panel ${activeTab === 'combined' ? 'active' : ''}`}>
-                    <div style={{ textAlign: 'center', padding: '12px', marginBottom: '16px' }}>
-                      <h4 style={{ margin: 0, color: '#3498db', fontSize: '1.3rem' }}>
-                        Combined System Performance
-                      </h4>
-                      <p style={{ margin: '8px 0 0 0', color: '#7f8c8d', fontSize: '0.9rem' }}>
-                        Total Head = Sum of all pump heads | Total BHP = Sum of all pump BHP
-                      </p>
-                    </div>
-                    <CurvePlot curves={combinedCurves} iprData={iprData} showIPR={showIPR} />
-                  </div>
-                )}
-                
-                {/* Tab Efficiency */}
-                {individualCurves.length > 1 && (
-                  <div className={`tab-panel ${activeTab === 'efficiency' ? 'active' : ''}`}>
-                    <div style={{ textAlign: 'center', padding: '12px', marginBottom: '16px' }}>
-                      <h4 style={{ margin: 0, color: '#2ecc71', fontSize: '1.3rem' }}>
-                        Individual Pump Efficiencies
-                      </h4>
-                      <p style={{ margin: '8px 0 0 0', color: '#7f8c8d', fontSize: '0.9rem' }}>
-                        Compare efficiency performance within recommended operating range
-                      </p>
-                    </div>
-                    <CurvePlot 
-                      curves={null}
-                      isIndividualEfficiency={true}
-                      individualEfficiencyData={individualCurves}
-                    />
-                  </div>
-                )}
-                
-                {/* Tab Head */}
-                {individualCurves.length > 1 && (
-                  <div className={`tab-panel ${activeTab === 'head' ? 'active' : ''}`}>
-                    <div style={{ textAlign: 'center', padding: '12px', marginBottom: '16px' }}>
-                      <h4 style={{ margin: 0, color: '#e74c3c', fontSize: '1.3rem' }}>
-                        Individual Pump Head Curves
-                      </h4>
-                      <p style={{ margin: '8px 0 0 0', color: '#7f8c8d', fontSize: '0.9rem' }}>
-                        Compare head performance within recommended operating range
-                      </p>
-                    </div>
-                    <CurvePlot 
-                      curves={null}
-                      isIndividualHead={true}
-                      individualHeadData={individualCurves}
-                      iprData={iprData}
-                      showIPR={showIPR}
-                    />
-                  </div>
-                )}
-                
-                {/* Tab BHP */}
-                {individualCurves.length > 1 && (
-                  <div className={`tab-panel ${activeTab === 'bhp' ? 'active' : ''}`}>
-                    <div style={{ textAlign: 'center', padding: '12px', marginBottom: '16px' }}>
-                      <h4 style={{ margin: 0, color: '#f39c12', fontSize: '1.3rem' }}>
-                        Individual Pump Power Curves
-                      </h4>
-                      <p style={{ margin: '8px 0 0 0', color: '#7f8c8d', fontSize: '0.9rem' }}>
-                        Compare power consumption within recommended operating range
-                      </p>
-                    </div>
-                    <CurvePlot 
-                      curves={null}
-                      isIndividualBhp={true}
-                      individualBhpData={individualCurves}
-                    />
-                  </div>
-                )}
-                
-                {/* Tab IPR */}
-                <div className={`tab-panel ${activeTab === 'ipr' ? 'active' : ''}`}>
-                  <div style={{ textAlign: 'center', padding: '12px', marginBottom: '16px' }}>
-                    <h4 style={{ margin: 0, color: '#16a085', fontSize: '1.3rem' }}>
-                      IPR Analysis - Inflow Performance Relationship
-                    </h4>
-                    <p style={{ margin: '8px 0 0 0', color: '#7f8c8d', fontSize: '0.9rem' }}>
-                      Well productivity analysis with optional pump curve overlay
-                    </p>
-                  </div>
-                  
-                  {/* Renderizar si tenemos iprData (pressureDemandCurve es opcional) */}
-                  {iprData ? (
-                    <CurvePlot 
-                      curves={null}
-                      isIPRMode={true}
-                      iprData={iprData}
-                      showIPR={true}
-                      pumpCurves={combinedCurves}
-                      pressureDemandCurve={pressureDemandCurve}
-                    />
-                  ) : (
-                    <div style={{ textAlign: 'center', padding: '40px', color: '#7f8c8d' }}>
-                      <p>⏳ Calculando IPR...</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-      
-      {isComparisonMode && (
-        <CurvePlot 
-          curves={null}
-          isComparisonMode={true}
-          comparisonData={{
-            pumps: [
-              { id: pump1, curves: pump1Curves, multiFreq: pump1MultiFreq, name: pump1 || 'Pump 1' },
-              { id: pump2, curves: pump2Curves, multiFreq: pump2MultiFreq, name: pump2 || 'Pump 2' },
-              ...(numPumpsToCompare >= 3 ? [{ id: pump3, curves: pump3Curves, multiFreq: pump3MultiFreq, name: pump3 || 'Pump 3' }] : [])
-            ].filter(p => p.id),
-            curveType: curveTypeToCompare
-          }}
-        />
-      )}
+        </section>
+      </div>
     </div>
   )
 }

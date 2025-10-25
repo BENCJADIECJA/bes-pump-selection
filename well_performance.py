@@ -9,6 +9,7 @@
 # - Viscosidad: cp
 
 import math
+from copy import deepcopy
 
 def calculate_fluid_gradient(grado_api, agua_porcentaje, gravedad_especifica_agua=1.0):
     """
@@ -380,5 +381,56 @@ def calculate_ipr_darcy(well_data):
             'agua_porcentaje': agua_porcentaje
         }
     }
+
+
+def scale_ipr_curve(ipr_data, caudal_scale=1.0, scenario_key=None):
+    """Create a scaled copy of an IPR curve applying a multiplicative factor to flow."""
+    if not ipr_data or not isinstance(ipr_data, dict):
+        return None
+
+    try:
+        scale = float(caudal_scale)
+    except (TypeError, ValueError):
+        scale = 1.0
+
+    if scale <= 0:
+        scale = 1.0
+
+    scenario_ipr = deepcopy(ipr_data)
+
+    original_curve = ipr_data.get('curve', [])
+    scaled_curve = []
+    for point in original_curve:
+        if not isinstance(point, dict):
+            continue
+
+        caudal = point.get('caudal', 0)
+        try:
+            scaled_caudal = float(caudal) * scale
+        except (TypeError, ValueError):
+            scaled_caudal = 0.0
+
+        scaled_point = dict(point)
+        scaled_point['caudal'] = round(scaled_caudal, 2)
+        scaled_curve.append(scaled_point)
+
+    scenario_ipr['curve'] = scaled_curve
+
+    if 'q_max' in scenario_ipr:
+        try:
+            scenario_ipr['q_max'] = round(float(scenario_ipr['q_max']) * scale, 2)
+        except (TypeError, ValueError):
+            pass
+
+    parameters = dict(ipr_data.get('parameters', {})) if isinstance(ipr_data.get('parameters'), dict) else {}
+    parameters['scenario_caudal_scale'] = round(scale, 4)
+    scenario_ipr['parameters'] = parameters
+
+    scenario_ipr['scenario'] = {
+        'key': scenario_key,
+        'caudal_scale': round(scale, 4)
+    }
+
+    return scenario_ipr
 
 

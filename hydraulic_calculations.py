@@ -234,6 +234,7 @@ def calculate_pressure_demand_curve(well_data, ipr_data=None):
     # Extraer parámetros
     profundidad_bomba = well_data.get('profundidad_intake', 1500)  # m (PD)
     presion_superficie = well_data.get('presion_superficie', 10)  # bar (TP)
+    presion_casing = well_data.get('presion_casing', 0)  # bar (Pcasing)
     
     # Parámetros de tubería para cálculo de fricción
     tubing_id_mm = well_data.get('tubing_id_mm', 62.0)  # Diámetro interno en mm
@@ -269,7 +270,8 @@ def calculate_pressure_demand_curve(well_data, ipr_data=None):
         
         # 1. Obtener PIP (Pump Intake Pressure) del IPR
         #    PIP = Pwf = Presión de fondo fluyente a este caudal
-        pip_bar = point['pwf']  # bar (del IPR)
+        pwf_bar = point['pwf']  # bar (del IPR)
+        pip_bar = pwf_bar + presion_casing  # bar (sumar presión de casing)
         nivel_dinamico = point.get('nivel', 0)  # m (del IPR)
         
         # 2. PD: Profundidad de la bomba (Pump Depth)
@@ -302,7 +304,8 @@ def calculate_pressure_demand_curve(well_data, ipr_data=None):
         pressure_curve.append({
             "caudal": round(q, 2),
             "tdh": round(tdh, 2),  # m (TDH que debe dar la bomba)
-            "pip": round(pip_bar, 2),  # bar (Presión de entrada desde IPR)
+            "pip": round(pip_bar, 2),  # bar (Presión de entrada = Pwf + Pcasing)
+            "pwf": round(pwf_bar, 2),  # bar (Presión de fondo fluyente del IPR)
             "nivel": round(nivel_dinamico, 2),  # m (Nivel dinámico del fluido)
             "perdidas_friccion": round(tf_bar, 2),  # bar
             "pd": round(pd, 2),  # m (Profundidad de bomba)
@@ -314,7 +317,8 @@ def calculate_pressure_demand_curve(well_data, ipr_data=None):
         'components': {
             'p_surface_target': presion_superficie,
             'profundidad_bomba': profundidad_bomba,
-            'gradiente': round(gradiente, 5)
+            'gradiente': round(gradiente, 5),
+            'p_casing': presion_casing
         }
     }
 

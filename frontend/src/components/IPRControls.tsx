@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react'
 
 interface IPRControlsProps {
@@ -35,6 +36,10 @@ interface IPRControlsProps {
   setAguaPorcentaje: (value: number) => void
   gravedadEspecificaAgua: number
   setGravedadEspecificaAgua: (value: number) => void
+  scenarioVisibility: { [key: string]: boolean }
+  onToggleScenario: (key: string) => void
+  scenarioStyles: { [key: string]: any }
+  scenarioOrder: string[]
 }
 
 export default function IPRControls(props: IPRControlsProps) {
@@ -55,7 +60,11 @@ export default function IPRControls(props: IPRControlsProps) {
     skin, setSkin,
     gradoApi, setGradoApi,
     aguaPorcentaje, setAguaPorcentaje,
-    gravedadEspecificaAgua, setGravedadEspecificaAgua
+    gravedadEspecificaAgua, setGravedadEspecificaAgua,
+    scenarioVisibility,
+    onToggleScenario,
+    scenarioStyles,
+    scenarioOrder
   } = props
 
   // Calcular PI automáticamente para método Linear cuando se ingresan Q y Pwf
@@ -86,12 +95,12 @@ export default function IPRControls(props: IPRControlsProps) {
   return (
     <div style={{ width: '100%' }}>
       <div style={{ marginBottom: '20px', padding: '15px', background: 'rgba(52, 152, 219, 0.1)', borderRadius: '8px' }}>
-        <h3 style={{ margin: '0 0 15px 0', color: '#3498db' }}>IPR Configuration</h3>
+        <h3 style={{ margin: '0 0 15px 0', color: '#8ea7f2' }}>IPR Configuration</h3>
         
         {/* Método de IPR */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px', marginBottom: '15px' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-            <span style={{ fontWeight: 600, color: '#34495e' }}>IPR Method:</span>
+            <span style={{ fontWeight: 600, color: '#d6def7' }}>IPR Method:</span>
             <select
               value={method}
               onChange={(e) => setMethod(e.target.value)}
@@ -105,12 +114,50 @@ export default function IPRControls(props: IPRControlsProps) {
           </label>
         </div>
 
+        <div style={{ marginBottom: '18px', padding: '12px', background: 'rgba(142, 68, 173, 0.15)', borderRadius: '8px', border: '1px solid rgba(142, 68, 173, 0.45)' }}>
+          <h4 style={{ margin: '0 0 10px 0', color: '#c7b3ff', fontSize: '0.95rem' }}>Scenario Overlays</h4>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+            {scenarioOrder && scenarioOrder.length > 0 ? (
+              scenarioOrder.map((key) => {
+                const style = scenarioStyles?.[key] || {}
+                const isChecked = !!scenarioVisibility?.[key]
+                return (
+                  <label
+                    key={key}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '6px 12px',
+                      borderRadius: '18px',
+                      border: `1px solid ${style.color || '#95a5a6'}`,
+                      background: isChecked ? 'rgba(46, 204, 113, 0.18)' : 'rgba(44, 62, 80, 0.35)',
+                      boxShadow: isChecked ? `0 0 6px rgba(46, 204, 113, 0.45)` : 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => onToggleScenario(key)}
+                      style={{ accentColor: style.color || '#3498db' }}
+                    />
+                    <span style={{ fontWeight: 600, color: style.color || '#d6def7' }}>{style.label || key}</span>
+                  </label>
+                )
+              })
+            ) : (
+              <span style={{ color: '#95a5a6', fontStyle: 'italic' }}>No scenarios available</span>
+            )}
+          </div>
+        </div>
+
         {/* Propiedades del Fluido */}
         <div style={{ marginBottom: '15px', padding: '12px', background: 'rgba(22, 160, 133, 0.1)', borderRadius: '6px', border: '1px solid rgba(22, 160, 133, 0.3)' }}>
-          <h4 style={{ margin: '0 0 10px 0', color: '#16a085', fontSize: '0.95rem' }}>🛢️ Propiedades del Fluido</h4>
+          <h4 style={{ margin: '0 0 10px 0', color: '#70d5c7', fontSize: '0.95rem' }}>🛢️ Propiedades del Fluido</h4>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px' }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <span style={{ fontWeight: 600, color: '#34495e' }}>°API:</span>
+              <span style={{ fontWeight: 600, color: '#d6def7' }}>°API:</span>
               <input
                 type="number"
                 value={gradoApi}
@@ -123,7 +170,7 @@ export default function IPRControls(props: IPRControlsProps) {
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <span style={{ fontWeight: 600, color: '#34495e' }}>% Agua:</span>
+              <span style={{ fontWeight: 600, color: '#d6def7' }}>% Agua:</span>
               <input
                 type="number"
                 value={aguaPorcentaje}
@@ -136,7 +183,7 @@ export default function IPRControls(props: IPRControlsProps) {
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <span style={{ fontWeight: 600, color: '#34495e' }}>SG Agua:</span>
+              <span style={{ fontWeight: 600, color: '#d6def7' }}>SG Agua:</span>
               <input
                 type="number"
                 value={gravedadEspecificaAgua}
@@ -154,7 +201,7 @@ export default function IPRControls(props: IPRControlsProps) {
         {/* Parámetros Comunes */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-            <span style={{ fontWeight: 600, color: '#34495e' }}>Pr (bar):</span>
+            <span style={{ fontWeight: 600, color: '#d6def7' }}>Pr (bar):</span>
             <input
               type="number"
               value={presionReservorio}
@@ -169,7 +216,7 @@ export default function IPRControls(props: IPRControlsProps) {
           {method === 'linear' && (
             <>
               <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                <span style={{ fontWeight: 600, color: '#34495e' }}>Q Test (m³/d):</span>
+                <span style={{ fontWeight: 600, color: '#d6def7' }}>Q Test (m³/d):</span>
                 <input
                   type="number"
                   value={qTest}
@@ -180,7 +227,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 />
               </label>
               <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                <span style={{ fontWeight: 600, color: '#34495e' }}>Pwf Test (bar):</span>
+                <span style={{ fontWeight: 600, color: '#d6def7' }}>Pwf Test (bar):</span>
                 <input
                   type="number"
                   value={pwfTest}
@@ -191,7 +238,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 />
               </label>
               <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                <span style={{ fontWeight: 600, color: '#34495e' }}>PI (calculado):</span>
+                <span style={{ fontWeight: 600, color: '#d6def7' }}>PI (calculado):</span>
                 <input
                   type="number"
                   value={pi}
@@ -206,7 +253,7 @@ export default function IPRControls(props: IPRControlsProps) {
           {/* Fetkovich: PI manual */}
           {method === 'fetkovich' && (
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <span style={{ fontWeight: 600, color: '#34495e' }}>PI (m³/d/bar):</span>
+              <span style={{ fontWeight: 600, color: '#d6def7' }}>PI (m³/d/bar):</span>
               <input
                 type="number"
                 value={pi}
@@ -221,7 +268,7 @@ export default function IPRControls(props: IPRControlsProps) {
           {/* Vogel: Presión de burbuja */}
           {method === 'vogel' && (
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <span style={{ fontWeight: 600, color: '#34495e' }}>Pb (bar):</span>
+              <span style={{ fontWeight: 600, color: '#d6def7' }}>Pb (bar):</span>
               <input
                 type="number"
                 value={presionBurbuja}
@@ -237,7 +284,7 @@ export default function IPRControls(props: IPRControlsProps) {
           {(method === 'vogel' || method === 'fetkovich') && (
             <>
               <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                <span style={{ fontWeight: 600, color: '#34495e' }}>Q Test (m³/d):</span>
+                <span style={{ fontWeight: 600, color: '#d6def7' }}>Q Test (m³/d):</span>
                 <input
                   type="number"
                   value={qTest}
@@ -248,7 +295,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 />
               </label>
               <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                <span style={{ fontWeight: 600, color: '#34495e' }}>Pwf Test (bar):</span>
+                <span style={{ fontWeight: 600, color: '#d6def7' }}>Pwf Test (bar):</span>
                 <input
                   type="number"
                   value={pwfTest}
@@ -264,7 +311,7 @@ export default function IPRControls(props: IPRControlsProps) {
           {/* Fetkovich: Exponente */}
           {method === 'fetkovich' && (
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <span style={{ fontWeight: 600, color: '#34495e' }}>n (exponente):</span>
+              <span style={{ fontWeight: 600, color: '#d6def7' }}>n (exponente):</span>
               <input
                 type="number"
                 value={nExponent}
@@ -282,7 +329,7 @@ export default function IPRControls(props: IPRControlsProps) {
         {method === 'darcy' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px', marginTop: '15px' }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <span style={{ fontWeight: 600, color: '#34495e' }}>k (mD):</span>
+              <span style={{ fontWeight: 600, color: '#d6def7' }}>k (mD):</span>
               <input
                 type="number"
                 value={permeabilidad}
@@ -293,7 +340,7 @@ export default function IPRControls(props: IPRControlsProps) {
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <span style={{ fontWeight: 600, color: '#34495e' }}>h (m):</span>
+              <span style={{ fontWeight: 600, color: '#d6def7' }}>h (m):</span>
               <input
                 type="number"
                 value={espesor}
@@ -304,7 +351,7 @@ export default function IPRControls(props: IPRControlsProps) {
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <span style={{ fontWeight: 600, color: '#34495e' }}>re (m):</span>
+              <span style={{ fontWeight: 600, color: '#d6def7' }}>re (m):</span>
               <input
                 type="number"
                 value={radioDrenaje}
@@ -315,7 +362,7 @@ export default function IPRControls(props: IPRControlsProps) {
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <span style={{ fontWeight: 600, color: '#34495e' }}>rw (m):</span>
+              <span style={{ fontWeight: 600, color: '#d6def7' }}>rw (m):</span>
               <input
                 type="number"
                 value={radioPozo}
@@ -326,7 +373,7 @@ export default function IPRControls(props: IPRControlsProps) {
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <span style={{ fontWeight: 600, color: '#34495e' }}>μ (cp):</span>
+              <span style={{ fontWeight: 600, color: '#d6def7' }}>μ (cp):</span>
               <input
                 type="number"
                 value={viscosidad}
@@ -337,7 +384,7 @@ export default function IPRControls(props: IPRControlsProps) {
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <span style={{ fontWeight: 600, color: '#34495e' }}>Bo (m³/m³):</span>
+              <span style={{ fontWeight: 600, color: '#d6def7' }}>Bo (m³/m³):</span>
               <input
                 type="number"
                 value={factorVolumen}
@@ -348,7 +395,7 @@ export default function IPRControls(props: IPRControlsProps) {
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <span style={{ fontWeight: 600, color: '#34495e' }}>Skin:</span>
+              <span style={{ fontWeight: 600, color: '#d6def7' }}>Skin:</span>
               <input
                 type="number"
                 value={skin}

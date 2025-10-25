@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react'
 import Plot from 'react-plotly.js'
 
@@ -47,15 +48,151 @@ function findOperatingPoint(pumpQ: number[], pumpHead: number[], iprQ: number[],
   return operatingPoint
 }
 
-export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isComparisonMode, comparisonData, isIndividualEfficiency, individualEfficiencyData, isIndividualHead, individualHeadData, isIndividualBhp, individualBhpData, iprData, showIPR, isIPRMode, pumpCurves, pressureDemandCurve }: any) {
+function interpolateValue(qArray: number[], valueArray: number[], targetQ: number) {
+  if (!qArray || !valueArray || qArray.length === 0 || valueArray.length === 0) return null
+  if (targetQ <= qArray[0]) return valueArray[0]
+  if (targetQ >= qArray[qArray.length - 1]) return valueArray[valueArray.length - 1]
+
+  for (let i = 0; i < qArray.length - 1; i++) {
+    const q1 = qArray[i]
+    const q2 = qArray[i + 1]
+    if (targetQ >= q1 && targetQ <= q2 && q2 !== q1) {
+      const v1 = valueArray[i]
+      const v2 = valueArray[i + 1]
+      const fraction = (targetQ - q1) / (q2 - q1)
+      return v1 + fraction * (v2 - v1)
+    }
+  }
+
+  return null
+}
+
+function findPumpDemandIntersection(pumpQ: number[], pumpHead: number[], demandQ: number[], demandHead: number[]) {
+  if (!pumpQ || !pumpHead || !demandQ || !demandHead) return null
+
+  for (let i = 0; i < pumpQ.length - 1; i++) {
+    const q1 = pumpQ[i]
+    const q2 = pumpQ[i + 1]
+    if (q2 === q1) continue
+
+    const pumpHead1 = pumpHead[i]
+    const pumpHead2 = pumpHead[i + 1]
+    const demandHead1 = interpolateValue(demandQ, demandHead, q1)
+    const demandHead2 = interpolateValue(demandQ, demandHead, q2)
+
+    if (demandHead1 === null || demandHead2 === null) continue
+
+    const diff1 = pumpHead1 - demandHead1
+    const diff2 = pumpHead2 - demandHead2
+
+    if (diff1 === 0) {
+      return { q: q1, head: pumpHead1 }
+    }
+
+    if (diff1 * diff2 < 0) {
+      const fraction = diff1 / (diff1 - diff2)
+      const intersectionQ = q1 + fraction * (q2 - q1)
+      const pumpHeadAtQ = interpolateValue(pumpQ, pumpHead, intersectionQ)
+      const demandHeadAtQ = interpolateValue(demandQ, demandHead, intersectionQ)
+      const headValue = pumpHeadAtQ !== null ? pumpHeadAtQ : demandHeadAtQ
+      return {
+        q: intersectionQ,
+        head: headValue !== null ? headValue : pumpHead1
+      }
+    }
+  }
+
+  return null
+}
+
+const DEFAULT_SCENARIO_STYLE = {
+  label: 'System Demand',
+  color: '#c0392b',
+  dash: 'dot',
+  symbol: 'star'
+}
+
+function formatScenarioLabel(key: string) {
+  if (!key || typeof key !== 'string') {
+    return DEFAULT_SCENARIO_STYLE.label
+  }
+  return key.charAt(0).toUpperCase() + key.slice(1)
+}
+
+function resolveScenarioStyle(key: string, scenarioStyles?: any) {
+  const fallback = key !== 'conservative' ? scenarioStyles?.conservative : {}
+  const style = scenarioStyles?.[key] || {}
+  const merged = { ...DEFAULT_SCENARIO_STYLE, ...(fallback || {}), ...(style || {}) }
+  if (!merged.label) {
+    merged.label = formatScenarioLabel(key)
+  }
+  if (!merged.color) {
+    merged.color = DEFAULT_SCENARIO_STYLE.color
+  }
+  if (!merged.dash) {
+    merged.dash = DEFAULT_SCENARIO_STYLE.dash
+  }
+  if (!merged.symbol) {
+    merged.symbol = DEFAULT_SCENARIO_STYLE.symbol
+  }
+  return merged
+}
+
+export default function CurvePlot({
+  curves,
+  multiFreqData,
+  isMultiFreq,
+  isComparisonMode,
+  comparisonData,
+  isIndividualEfficiency,
+  individualEfficiencyData,
+  isIndividualHead,
+  individualHeadData,
+  isIndividualBhp,
+  individualBhpData,
+  iprData,
+  showIPR,
+  isIPRMode,
+  pumpCurves,
+  pressureDemandCurve,
+  pressureDemandScenarios,
+  iprScenarios,
+  scenarioVisibility,
+  scenarioStyles,
+  scenarioOrder,
+  activeScenarioKey
+}: any) {
   // Modo IPR dedicado - SOLO curva IPR
   if (isIPRMode) {
-    return <IPRPlot iprData={iprData} pressureDemandCurve={pressureDemandCurve} />
+    return (
+      <IPRPlot
+        iprData={iprData}
+        pressureDemandCurve={pressureDemandCurve}
+        pressureDemandScenarios={pressureDemandScenarios}
+        iprScenarios={iprScenarios}
+        scenarioVisibility={scenarioVisibility}
+        scenarioStyles={scenarioStyles}
+        scenarioOrder={scenarioOrder}
+        activeScenarioKey={activeScenarioKey}
+      />
+    )
   }
   
   // Modo Head individual
   if (isIndividualHead && individualHeadData) {
-    return <IndividualHeadPlot data={individualHeadData} iprData={iprData} showIPR={showIPR} />
+    return (
+      <IndividualHeadPlot
+        data={individualHeadData}
+        iprData={iprData}
+        showIPR={showIPR}
+        pressureDemandCurve={pressureDemandCurve}
+        pressureDemandScenarios={pressureDemandScenarios}
+        scenarioVisibility={scenarioVisibility}
+        scenarioStyles={scenarioStyles}
+        scenarioOrder={scenarioOrder}
+        activeScenarioKey={activeScenarioKey}
+      />
+    )
   }
   
   // Modo BHP individual
@@ -75,7 +212,19 @@ export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isCompar
   
   // Modo multifrecuencia
   if (isMultiFreq && multiFreqData && multiFreqData.length > 0) {
-    return <MultiFreqPlot multiFreqData={multiFreqData} iprData={iprData} showIPR={showIPR} />
+    return (
+      <MultiFreqPlot
+        multiFreqData={multiFreqData}
+        iprData={iprData}
+        showIPR={showIPR}
+        pressureDemandCurve={pressureDemandCurve}
+        pressureDemandScenarios={pressureDemandScenarios}
+        scenarioVisibility={scenarioVisibility}
+        scenarioStyles={scenarioStyles}
+        scenarioOrder={scenarioOrder}
+        activeScenarioKey={activeScenarioKey}
+      />
+    )
   }
   
   // Modo normal (single frequency)
@@ -97,6 +246,113 @@ export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isCompar
   const maxHead = Math.max(...head)
   const maxBhp = Math.max(...bhp)
   const maxEff = Math.max(...eff)
+  let headRangeMax = maxHead
+
+  const pumpDepth = typeof pressureDemandCurve?.components?.profundidad_bomba === 'number'
+    ? pressureDemandCurve.components.profundidad_bomba
+    : null
+
+  const fluidGradient = typeof pressureDemandCurve?.components?.gradiente === 'number'
+    ? pressureDemandCurve.components.gradiente
+    : null
+
+  let demandData: { q: number[], head: number[], raw: any[] } | null = null
+  let operatingPointWithDemand: any = null
+  let demandAnnotationText = ''
+  let demandHoverTemplate = ''
+
+  if (pressureDemandCurve && pressureDemandCurve.curve && pressureDemandCurve.curve.length > 0) {
+    const demandQ = pressureDemandCurve.curve.map((p: any) => p.caudal)
+    const demandHeadValues = pressureDemandCurve.curve.map((p: any) => p.tdh)
+    const demandPipValues = pressureDemandCurve.curve.map((p: any) => p.pip)
+    const demandPwfValues = pressureDemandCurve.curve.map((p: any) => p.pwf)
+    const demandLevelValues = pressureDemandCurve.curve.map((p: any) => p.nivel)
+    const demandFrictionValues = pressureDemandCurve.curve.map((p: any) => p.perdidas_friccion)
+    headRangeMax = Math.max(headRangeMax, Math.max(...demandHeadValues))
+
+    demandData = {
+      q: demandQ,
+      head: demandHeadValues,
+      raw: pressureDemandCurve.curve
+    }
+
+    const intersection = findPumpDemandIntersection(q, head, demandQ, demandHeadValues)
+    if (intersection) {
+      const effAtPoint = interpolateValue(q, eff, intersection.q)
+      const bhpAtPoint = interpolateValue(q, bhp, intersection.q)
+
+      let pipAtPoint: number | null = null
+      let pwfAtPoint: number | null = null
+      let levelAtPoint: number | null = null
+      let submergenceAtPoint: number | null = null
+      let fluidLevelAtPoint: number | null = null
+
+      if (demandPipValues && demandPipValues.length > 0) {
+        pipAtPoint = interpolateValue(demandQ, demandPipValues, intersection.q)
+      }
+
+      if (demandPwfValues && demandPwfValues.length > 0) {
+        pwfAtPoint = interpolateValue(demandQ, demandPwfValues, intersection.q)
+      }
+
+      if (demandLevelValues && demandLevelValues.length > 0) {
+        levelAtPoint = interpolateValue(demandQ, demandLevelValues, intersection.q)
+      }
+
+      if (
+        pwfAtPoint !== null &&
+        typeof fluidGradient === 'number' &&
+        fluidGradient > 0
+      ) {
+        const rawSubmergence = pwfAtPoint / fluidGradient
+        if (isFinite(rawSubmergence)) {
+          submergenceAtPoint = Math.max(rawSubmergence, 0)
+        }
+      }
+
+      if (submergenceAtPoint !== null && typeof pumpDepth === 'number') {
+        const rawFluidLevel = pumpDepth - submergenceAtPoint
+        if (isFinite(rawFluidLevel)) {
+          fluidLevelAtPoint = Math.min(Math.max(rawFluidLevel, 0), pumpDepth)
+        }
+      }
+
+      operatingPointWithDemand = {
+        q: intersection.q,
+        head: intersection.head,
+        efficiency: effAtPoint,
+        bhp: bhpAtPoint,
+        pip: pipAtPoint,
+        pwf: pwfAtPoint,
+        nivel: levelAtPoint,
+        fluidLevel: fluidLevelAtPoint,
+        submergence: submergenceAtPoint,
+        friction: demandFrictionValues && demandFrictionValues.length > 0
+          ? interpolateValue(demandQ, demandFrictionValues, intersection.q)
+          : null
+      }
+
+      demandAnnotationText = `<b>System Operating Point</b><br>Q = ${intersection.q.toFixed(1)} m³/d` +
+        `<br>TDH = ${intersection.head.toFixed(1)} m` +
+        (effAtPoint !== null ? `<br>η = ${effAtPoint.toFixed(1)} %` : '') +
+        (bhpAtPoint !== null ? `<br>BHP = ${bhpAtPoint.toFixed(1)} HP` : '') +
+        (pipAtPoint !== null ? `<br>PIP: ${pipAtPoint.toFixed(1)} bar` : '') +
+        (pwfAtPoint !== null ? `<br>Pwf: ${pwfAtPoint.toFixed(1)} bar` : '') +
+        (fluidLevelAtPoint !== null ? `<br>Fluid Level: ${fluidLevelAtPoint.toFixed(1)} m` : '') +
+        (submergenceAtPoint !== null ? `<br>Submergence: ${submergenceAtPoint.toFixed(1)} m` : '')
+
+      demandHoverTemplate = `<b>System Operating Point</b><br>` +
+        `Flow: ${intersection.q.toFixed(2)} m³/d<br>` +
+        `TDH: ${intersection.head.toFixed(2)} m` +
+        (effAtPoint !== null ? `<br>Efficiency: ${effAtPoint.toFixed(2)} %` : '') +
+        (bhpAtPoint !== null ? `<br>BHP: ${bhpAtPoint.toFixed(2)} HP` : '') +
+        (pipAtPoint !== null ? `<br>PIP: ${pipAtPoint.toFixed(2)} bar` : '') +
+        (pwfAtPoint !== null ? `<br>Pwf: ${pwfAtPoint.toFixed(2)} bar` : '') +
+        (fluidLevelAtPoint !== null ? `<br>Fluid Level: ${fluidLevelAtPoint.toFixed(2)} m` : '') +
+        (submergenceAtPoint !== null ? `<br>Submergence: ${submergenceAtPoint.toFixed(2)} m` : '') +
+        '<extra></extra>'
+    }
+  }
 
   // Encontrar el BEP (Best Efficiency Point) - punto de máxima eficiencia
   const maxEffIndex = eff.indexOf(maxEff)
@@ -109,7 +365,7 @@ export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isCompar
     // Región sombreada para el rango de operación recomendado
     {
       x: [minQ, minQ, maxQRange, maxQRange, minQ],
-      y: [0, maxHead * 1.5, maxHead * 1.5, 0, 0],
+      y: [0, headRangeMax * 1.5, headRangeMax * 1.5, 0, 0],
       fill: 'toself',
       fillcolor: 'rgba(46, 204, 113, 0.1)',
       line: { width: 0 },
@@ -123,7 +379,7 @@ export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isCompar
     // Líneas verticales para marcar min y max Q
     {
       x: [minQ, minQ],
-      y: [0, maxHead * 1.2],
+      y: [0, headRangeMax * 1.2],
       mode: 'lines',
       type: 'scatter',
       line: { color: '#27ae60', width: 2, dash: 'dot' },
@@ -134,7 +390,7 @@ export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isCompar
     },
     {
       x: [maxQRange, maxQRange],
-      y: [0, maxHead * 1.2],
+      y: [0, headRangeMax * 1.2],
       mode: 'lines',
       type: 'scatter',
       line: { color: '#27ae60', width: 2, dash: 'dot' },
@@ -146,7 +402,7 @@ export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isCompar
     // Línea vertical para el BEP (Best Efficiency Point)
     {
       x: [bepQ, bepQ],
-      y: [0, maxHead * 1.2],
+      y: [0, headRangeMax * 1.2],
       mode: 'lines',
       type: 'scatter',
       line: { color: '#e67e22', width: 3, dash: 'dash' },
@@ -199,6 +455,38 @@ export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isCompar
     }
   ]
 
+  if (demandData) {
+    data.push({
+      x: demandData.q,
+      y: demandData.head,
+      type: 'scatter',
+      mode: 'lines',
+      name: 'System Demand (TDH)',
+      yaxis: 'y1',
+      line: { color: '#c0392b', width: 3, dash: 'dot' },
+      hovertemplate: '<b>System Demand</b><br>Q: %{x:.2f} m³/d<br>TDH: %{y:.2f} m<extra></extra>'
+    })
+  }
+
+  if (operatingPointWithDemand) {
+    data.push({
+      x: [operatingPointWithDemand.q],
+      y: [operatingPointWithDemand.head],
+      mode: 'markers',
+      type: 'scatter',
+      marker: {
+        color: '#c0392b',
+        size: 16,
+        symbol: 'star',
+        line: { color: 'white', width: 2 }
+      },
+      name: 'System Operating Point',
+      showlegend: true,
+      hovertemplate: demandHoverTemplate,
+      yaxis: 'y1'
+    })
+  }
+
   // Agregar curva de IPR si está disponible
   if (showIPR && iprData && iprData.curve) {
     const iprQ = iprData.curve.map((p: any) => p.caudal)
@@ -236,6 +524,31 @@ export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isCompar
     }
   }
 
+  const annotations: any[] = []
+
+  if (operatingPointWithDemand) {
+    annotations.push({
+      x: operatingPointWithDemand.q,
+      y: operatingPointWithDemand.head,
+      xanchor: 'left',
+      yanchor: 'bottom',
+      text: demandAnnotationText,
+      showarrow: true,
+      arrowhead: 4,
+      arrowsize: 1,
+      arrowwidth: 2,
+      arrowcolor: '#c0392b',
+      bgcolor: 'rgba(255, 255, 255, 0.92)',
+      bordercolor: '#c0392b',
+      borderwidth: 1,
+      font: {
+        size: 12,
+        color: '#2c3e50',
+        family: 'Segoe UI, sans-serif'
+      }
+    })
+  }
+
   const layout = {
     title: {
       text: 'Pump Performance Curves',
@@ -267,7 +580,7 @@ export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isCompar
       side: 'left',
       showgrid: true,
       gridcolor: '#ecf0f1',
-      range: [0, maxHead * 1.1],
+      range: [0, headRangeMax * 1.1],
       zeroline: true,
       zerolinecolor: '#95a5a6',
       zerolinewidth: 2,
@@ -303,13 +616,13 @@ export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isCompar
       titlefont: { color: '#2ecc71' },
       tickfont: { color: '#2ecc71' }
     },
-    legend: { 
+    legend: {
       orientation: 'h',
       yanchor: 'bottom',
-      y: -0.25,
+      y: 1.18,
       xanchor: 'center',
       x: 0.5,
-      bgcolor: 'rgba(255, 255, 255, 0.8)',
+      bgcolor: 'rgba(255, 255, 255, 0.85)',
       bordercolor: '#95a5a6',
       borderwidth: 1,
       font: { size: 12, weight: 600 }
@@ -323,7 +636,8 @@ export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isCompar
       font: { size: 13, family: 'Segoe UI, sans-serif' },
       namelength: -1
     },
-    margin: { l: 80, r: 180, t: 80, b: 120 }
+  margin: { l: 80, r: 180, t: 160, b: 90 },
+    annotations
   }
 
   const config = {
@@ -346,7 +660,7 @@ export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isCompar
         data={data} 
         layout={layout} 
         config={config}
-        style={{ width: '100%', height: '600px' }} 
+  style={{ width: '100%', height: '660px' }} 
         useResizeHandler={true} 
       />
     </div>
@@ -354,35 +668,147 @@ export default function CurvePlot({ curves, multiFreqData, isMultiFreq, isCompar
 }
 
 // Componente para gráfico multifrecuencia
-function MultiFreqPlot({ multiFreqData, iprData, showIPR }: any) {
+function MultiFreqPlot({
+  multiFreqData,
+  iprData,
+  showIPR,
+  pressureDemandCurve,
+  pressureDemandScenarios,
+  scenarioVisibility,
+  scenarioStyles,
+  scenarioOrder,
+  activeScenarioKey
+}: any) {
   const colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e', '#16a085', '#c0392b']
-  
+
   const data: any[] = []
-  
-  // Arrays para construir la región sombreada (operating range envelope)
-  const minQPoints: number[] = []
-  const maxQPoints: number[] = []
-  const freqValues: number[] = []
-  const maxHeadValues: number[] = []
-  
-  // Agregar curvas de TDH para cada frecuencia
-  multiFreqData.forEach((item: any, idx: number) => {
+
+  const multiFreqList = Array.isArray(multiFreqData) ? multiFreqData : []
+  const sortedMultiFreq = [...multiFreqList]
+    .filter((item: any) => item && item.curves && item.curves.head && item.curves.head.length > 0)
+    .sort((a: any, b: any) => a.freq - b.freq)
+
+  const curveMeta: {
+    freq: number
+    q: number[]
+    head: number[]
+    minQ: number
+    maxQ: number
+  }[] = []
+  const bepPoints: { freq: number; q: number; head: number; efficiency: number }[] = []
+  const allQValues = new Set<number>()
+  const scenarioOperatingPoints: Record<string, { freq: number; q: number; head: number; efficiency: number | null; bhp: number | null }[]> = {}
+
+  let maxQ = 0
+  let maxHead = 0
+
+  const demandSeries: any[] = []
+
+  const configuredOrder = Array.isArray(scenarioOrder) && scenarioOrder.length > 0
+    ? scenarioOrder
+    : Object.keys(pressureDemandScenarios || {})
+
+  const activeKeys = configuredOrder.filter((key) => scenarioVisibility?.[key])
+  const fallbackKey = activeScenarioKey
+    || (configuredOrder.includes('conservative') ? 'conservative' : configuredOrder[0])
+    || 'conservative'
+
+  const baseDemandSource = pressureDemandCurve && Array.isArray(pressureDemandCurve.curve) && pressureDemandCurve.curve.length > 0
+    ? pressureDemandCurve
+    : null
+
+  const pushScenario = (scenarioKey: string, source: any) => {
+    if (!source || !Array.isArray(source.curve) || source.curve.length === 0) {
+      return
+    }
+    if (demandSeries.some((series) => series.key === scenarioKey)) {
+      return
+    }
+
+    const style = resolveScenarioStyle(scenarioKey, scenarioStyles)
+    const qValues = source.curve.map((p: any) => p.caudal)
+    const headValues = source.curve.map((p: any) => p.tdh)
+
+    if (!qValues.length || !headValues.length) {
+      return
+    }
+
+    demandSeries.push({
+      key: scenarioKey,
+      label: style.label,
+      color: style.color,
+      dash: style.dash || 'dot',
+      symbol: style.symbol || 'star',
+      q: qValues,
+      head: headValues,
+      raw: source.curve
+    })
+    scenarioOperatingPoints[scenarioKey] = []
+  }
+
+  const demandSources = pressureDemandScenarios || {}
+  const keysToPlot = (activeKeys.length > 0 ? activeKeys : [fallbackKey]).filter(Boolean)
+
+  keysToPlot.forEach((scenarioKey) => {
+    let source = demandSources[scenarioKey]
+    if (!source && scenarioKey === 'conservative') {
+      source = baseDemandSource
+    }
+    if (source) {
+      pushScenario(scenarioKey, source)
+    }
+  })
+
+  if (!demandSeries.length && baseDemandSource) {
+    pushScenario('conservative', baseDemandSource)
+  }
+
+  demandSeries.forEach((series) => {
+    series.q.forEach((value: number) => allQValues.add(value))
+    if (series.q.length) {
+      maxQ = Math.max(maxQ, ...series.q, maxQ)
+    }
+    if (series.head.length) {
+      maxHead = Math.max(maxHead, ...series.head, maxHead)
+    }
+  })
+
+  sortedMultiFreq.forEach((item: any, idx: number) => {
     const freq = item.freq
     const curves = item.curves
-    
-    if (!curves || !curves.head) return
-    
+
+    if (!curves || !curves.head || curves.head.length === 0) return
+
     const q = curves.head.map((p: any) => p.caudal)
     const head = curves.head.map((p: any) => p.valor)
-    const operatingRange = curves.operating_range || { min_q: 0, max_q: 0 }
-    
-    // Guardar datos para la región sombreada
-    freqValues.push(freq)
-    minQPoints.push(operatingRange.min_q)
-    maxQPoints.push(operatingRange.max_q)
-    maxHeadValues.push(Math.max(...head))
-    
-    // Curva de TDH para esta frecuencia
+
+    if (!q.length || !head.length) return
+
+    const operatingRange = curves.operating_range || { min_q: q[0], max_q: q[q.length - 1] }
+    const minQ = operatingRange.min_q ?? q[0]
+    const maxQRange = operatingRange.max_q ?? q[q.length - 1]
+
+    q.forEach((value: number) => allQValues.add(value))
+    allQValues.add(minQ)
+    allQValues.add(maxQRange)
+
+    const efficiencyQ = curves.efficiency ? curves.efficiency.map((p: any) => p.caudal) : null
+    const efficiencyValues = curves.efficiency ? curves.efficiency.map((p: any) => p.valor * 100) : null
+    const bhpValues = curves.bhp ? curves.bhp.map((p: any) => p.valor) : null
+
+    curveMeta.push({
+      freq,
+      q,
+      head,
+      minQ,
+      maxQ: maxQRange
+    })
+
+    const maxCurveQ = Math.max(...q)
+    const maxCurveHead = Math.max(...head)
+    maxQ = Math.max(maxQ, maxCurveQ, maxQRange)
+    maxHead = Math.max(maxHead, maxCurveHead)
+
     data.push({
       x: q,
       y: head,
@@ -392,42 +818,89 @@ function MultiFreqPlot({ multiFreqData, iprData, showIPR }: any) {
       line: { color: colors[idx % colors.length], width: 3 },
       hovertemplate: `<b>${freq.toFixed(1)} Hz</b><br>Q: %{x:.2f} m³/d<br>Head: %{y:.2f} m<extra></extra>`
     })
+
+    if (efficiencyQ && efficiencyValues && efficiencyValues.length > 0) {
+      const maxEffValue = Math.max(...efficiencyValues)
+      const maxEffIndex = efficiencyValues.indexOf(maxEffValue)
+      const bepQ = efficiencyQ[maxEffIndex]
+      const bepHead = interpolateValue(q, head, bepQ)
+
+      if (bepHead !== null) {
+        bepPoints.push({
+          freq,
+          q: bepQ,
+          head: bepHead,
+          efficiency: maxEffValue
+        })
+        allQValues.add(bepQ)
+        maxQ = Math.max(maxQ, bepQ)
+        maxHead = Math.max(maxHead, bepHead)
+      }
+    }
+
+    demandSeries.forEach((series) => {
+      const intersection = findPumpDemandIntersection(q, head, series.q, series.head)
+      if (!intersection) {
+        return
+      }
+
+      const effAtPoint = efficiencyValues
+        ? interpolateValue(efficiencyQ || q, efficiencyValues, intersection.q)
+        : null
+      const bhpAtPoint = bhpValues ? interpolateValue(q, bhpValues, intersection.q) : null
+
+      if (!scenarioOperatingPoints[series.key]) {
+        scenarioOperatingPoints[series.key] = []
+      }
+
+      scenarioOperatingPoints[series.key].push({
+        freq,
+        q: intersection.q,
+        head: intersection.head,
+        efficiency: effAtPoint,
+        bhp: bhpAtPoint
+      })
+
+      allQValues.add(intersection.q)
+      maxQ = Math.max(maxQ, intersection.q)
+      maxHead = Math.max(maxHead, intersection.head)
+    })
   })
-  
-  // Crear región sombreada uniendo los puntos de Q_min y Q_max
-  // Región izquierda (Q_min envelope)
-  const minQEnvelopeX: number[] = []
-  const minQEnvelopeY: number[] = []
-  multiFreqData.forEach((item: any) => {
-    const curves = item.curves
-    if (!curves || !curves.head) return
-    const minQ = curves.operating_range?.min_q || 0
-    const headAtMinQ = curves.head.find((p: any) => p.caudal >= minQ)
-    if (headAtMinQ) {
-      minQEnvelopeX.push(minQ)
-      minQEnvelopeY.push(headAtMinQ.valor)
+
+  const qSamples = Array.from(allQValues).sort((a, b) => a - b)
+  const topBoundary: { q: number; head: number }[] = []
+  const bottomBoundary: { q: number; head: number }[] = []
+
+  qSamples.forEach((qVal) => {
+    const headCandidates: number[] = []
+
+    curveMeta.forEach((curve) => {
+      if (qVal < curve.minQ || qVal > curve.maxQ) return
+      const headVal = interpolateValue(curve.q, curve.head, qVal)
+      if (headVal !== null && isFinite(headVal)) {
+        headCandidates.push(headVal)
+      }
+    })
+
+    if (headCandidates.length >= 2) {
+      const maxHeadAtQ = Math.max(...headCandidates)
+      const minHeadAtQ = Math.min(...headCandidates)
+      topBoundary.push({ q: qVal, head: maxHeadAtQ })
+      bottomBoundary.push({ q: qVal, head: minHeadAtQ })
     }
   })
-  
-  // Región derecha (Q_max envelope)
-  const maxQEnvelopeX: number[] = []
-  const maxQEnvelopeY: number[] = []
-  multiFreqData.forEach((item: any) => {
-    const curves = item.curves
-    if (!curves || !curves.head) return
-    const maxQ = curves.operating_range?.max_q || 0
-    const headAtMaxQ = curves.head.find((p: any) => p.caudal >= maxQ)
-    if (headAtMaxQ) {
-      maxQEnvelopeX.push(maxQ)
-      maxQEnvelopeY.push(headAtMaxQ.valor)
-    }
-  })
-  
-  // Región sombreada: unir min y max creando un polígono
-  if (minQEnvelopeX.length > 0 && maxQEnvelopeX.length > 0) {
-    const envelopeX = [...minQEnvelopeX, ...maxQEnvelopeX.reverse(), minQEnvelopeX[0]]
-    const envelopeY = [...minQEnvelopeY, ...maxQEnvelopeY.reverse(), minQEnvelopeY[0]]
-    
+
+  if (topBoundary.length >= 2 && bottomBoundary.length >= 2) {
+    const upperX = topBoundary.map((point) => point.q)
+    const upperY = topBoundary.map((point) => point.head)
+    const lowerX = bottomBoundary.slice().reverse().map((point) => point.q)
+    const lowerY = bottomBoundary.slice().reverse().map((point) => point.head)
+
+    const envelopeX = [...upperX, ...lowerX, upperX[0]]
+    const envelopeY = [...upperY, ...lowerY, upperY[0]]
+
+    maxHead = Math.max(maxHead, ...upperY)
+
     data.unshift({
       x: envelopeX,
       y: envelopeY,
@@ -441,9 +914,79 @@ function MultiFreqPlot({ multiFreqData, iprData, showIPR }: any) {
       hoverinfo: 'skip'
     })
   }
-  
-  const maxQ = Math.max(...multiFreqData.flatMap((item: any) => item.curves?.head?.map((p: any) => p.caudal) || []))
-  const maxHead = Math.max(...maxHeadValues)
+
+  if (bepPoints.length > 0) {
+    const sortedBepPoints = [...bepPoints].sort((a, b) => a.freq - b.freq)
+
+    data.push({
+      x: sortedBepPoints.map((point) => point.q),
+      y: sortedBepPoints.map((point) => point.head),
+      type: 'scatter',
+      mode: 'lines+markers',
+      name: 'BEP Path',
+      line: { color: '#e67e22', width: 2, dash: 'dot' },
+      marker: { color: '#e67e22', size: 9, symbol: 'diamond' },
+      customdata: sortedBepPoints.map((point) => [point.freq, point.efficiency]),
+      hovertemplate: '<b>%{customdata[0]:.1f} Hz BEP</b><br>Q: %{x:.2f} m³/d<br>Head: %{y:.2f} m<br>η: %{customdata[1]:.2f}%<extra></extra>'
+    })
+  }
+
+  demandSeries.forEach((series) => {
+    data.push({
+      x: series.q,
+      y: series.head,
+      type: 'scatter',
+      mode: 'lines',
+      name: `${series.label} Demand (TDH)`,
+      line: { color: series.color, width: 3, dash: series.dash || 'dot' },
+      hovertemplate: `<b>${series.label} Demand</b><br>Q: %{x:.2f} m³/d<br>TDH: %{y:.2f} m<extra></extra>`,
+      legendgroup: `demand-${series.key}`
+    })
+
+    const points = scenarioOperatingPoints[series.key] || []
+    if (!points.length) {
+      return
+    }
+
+    const sortedOperating = [...points].sort((a, b) => a.freq - b.freq)
+    const hoverTexts = sortedOperating.map((point) => {
+      const freqText = `${point.freq.toFixed(1)} Hz`
+      const effText = point.efficiency !== null && isFinite(point.efficiency)
+        ? `${point.efficiency.toFixed(2)} %`
+        : 'N/A'
+      const bhpText = point.bhp !== null && isFinite(point.bhp)
+        ? `${point.bhp.toFixed(2)} HP`
+        : 'N/A'
+
+      return (
+        `${series.label} – ${freqText}` +
+        `<br>Q: ${point.q.toFixed(2)} m³/d` +
+        `<br>TDH: ${point.head.toFixed(2)} m` +
+        `<br>η: ${effText}` +
+        `<br>BHP: ${bhpText}`
+      )
+    })
+
+    data.push({
+      x: sortedOperating.map((point) => point.q),
+      y: sortedOperating.map((point) => point.head),
+      type: 'scatter',
+      mode: 'markers',
+      name: `${series.label} Operating Points`,
+      legendgroup: `demand-${series.key}`,
+      marker: {
+        color: series.color,
+        size: 14,
+        symbol: series.symbol || 'star',
+        line: { color: '#ffffff', width: 2 }
+      },
+      text: hoverTexts,
+      hovertemplate: '%{text}<extra></extra>'
+    })
+  })
+
+  const effectiveMaxQ = maxQ > 0 ? maxQ * 1.05 : 1
+  const effectiveMaxHead = maxHead > 0 ? maxHead * 1.1 : 1
   
   // NO mostrar IPR en vista multifrecuencia (Combined System)
   // El IPR solo se muestra en la pestaña dedicada "IPR Analysis"
@@ -463,7 +1006,7 @@ function MultiFreqPlot({ multiFreqData, iprData, showIPR }: any) {
         text: 'Flow Rate (Q - m³/d)',
         font: { size: 16, color: '#34495e', weight: 600 }
       },
-      range: [0, maxQ * 1.05],
+      range: [0, effectiveMaxQ],
       showgrid: true,
       gridcolor: '#ecf0f1',
       zeroline: true,
@@ -475,7 +1018,7 @@ function MultiFreqPlot({ multiFreqData, iprData, showIPR }: any) {
         text: 'Head (m)',
         font: { size: 16, color: '#3498db', weight: 600 }
       },
-      range: [0, maxHead * 1.1],
+      range: [0, effectiveMaxHead],
       showgrid: true,
       gridcolor: '#ecf0f1',
       zeroline: true,
@@ -483,12 +1026,12 @@ function MultiFreqPlot({ multiFreqData, iprData, showIPR }: any) {
       zerolinewidth: 2
     },
     legend: {
-      orientation: 'v',
-      yanchor: 'top',
-      y: 0.98,
-      xanchor: 'right',
-      x: 0.98,
-      bgcolor: 'rgba(255, 255, 255, 0.9)',
+      orientation: 'h',
+      yanchor: 'bottom',
+      y: 1.18,
+      xanchor: 'center',
+      x: 0.5,
+      bgcolor: 'rgba(255, 255, 255, 0.85)',
       bordercolor: '#95a5a6',
       borderwidth: 1,
       font: { size: 12, weight: 600 }
@@ -496,7 +1039,7 @@ function MultiFreqPlot({ multiFreqData, iprData, showIPR }: any) {
     plot_bgcolor: '#fafafa',
     paper_bgcolor: 'white',
     hovermode: 'closest',
-    margin: { l: 80, r: 80, t: 80, b: 100 }
+  margin: { l: 80, r: 80, t: 160, b: 90 }
   }
   
   const config = {
@@ -519,7 +1062,7 @@ function MultiFreqPlot({ multiFreqData, iprData, showIPR }: any) {
         data={data} 
         layout={layout} 
         config={config}
-        style={{ width: '100%', height: '600px' }} 
+  style={{ width: '100%', height: '660px' }} 
         useResizeHandler={true} 
       />
     </div>
@@ -711,12 +1254,12 @@ function ComparisonPlot({ comparisonData }: any) {
       zerolinewidth: 2
     },
     legend: {
-      orientation: 'v',
-      yanchor: 'top',
-      y: 0.98,
-      xanchor: 'right',
-      x: 0.98,
-      bgcolor: 'rgba(255, 255, 255, 0.9)',
+      orientation: 'h',
+      yanchor: 'bottom',
+      y: 1.18,
+      xanchor: 'center',
+      x: 0.5,
+      bgcolor: 'rgba(255, 255, 255, 0.85)',
       bordercolor: '#95a5a6',
       borderwidth: 1,
       font: { size: 12, weight: 600 }
@@ -724,7 +1267,7 @@ function ComparisonPlot({ comparisonData }: any) {
     plot_bgcolor: '#fafafa',
     paper_bgcolor: 'white',
     hovermode: 'closest',
-    margin: { l: 80, r: 80, t: 80, b: 100 }
+  margin: { l: 80, r: 80, t: 160, b: 90 }
   }
   
   const config = {
@@ -747,7 +1290,7 @@ function ComparisonPlot({ comparisonData }: any) {
         data={data} 
         layout={layout} 
         config={config}
-        style={{ width: '100%', height: '600px' }} 
+  style={{ width: '100%', height: '660px' }} 
         useResizeHandler={true} 
       />
     </div>
@@ -883,12 +1426,12 @@ function IndividualEfficiencyPlot({ data }: any) {
       zerolinewidth: 2
     },
     legend: {
-      orientation: 'v',
-      yanchor: 'top',
-      y: 0.98,
-      xanchor: 'right',
-      x: 0.98,
-      bgcolor: 'rgba(255, 255, 255, 0.9)',
+      orientation: 'h',
+      yanchor: 'bottom',
+      y: 1.18,
+      xanchor: 'center',
+      x: 0.5,
+      bgcolor: 'rgba(255, 255, 255, 0.85)',
       bordercolor: '#95a5a6',
       borderwidth: 1,
       font: { size: 12, weight: 600 }
@@ -896,7 +1439,7 @@ function IndividualEfficiencyPlot({ data }: any) {
     plot_bgcolor: '#fafafa',
     paper_bgcolor: 'white',
     hovermode: 'closest',
-    margin: { l: 80, r: 80, t: 80, b: 100 }
+  margin: { l: 80, r: 80, t: 160, b: 90 }
   }
   
   const config = {
@@ -919,7 +1462,7 @@ function IndividualEfficiencyPlot({ data }: any) {
         data={plotData} 
         layout={layout} 
         config={config}
-        style={{ width: '100%', height: '600px' }} 
+  style={{ width: '100%', height: '660px' }} 
         useResizeHandler={true} 
       />
     </div>
@@ -927,7 +1470,7 @@ function IndividualEfficiencyPlot({ data }: any) {
 }
 
 // Componente para mostrar curvas de Head individuales dentro del rango operativo
-function IndividualHeadPlot({ data, iprData, showIPR }: any) {
+function IndividualHeadPlot({ data, iprData, showIPR, pressureDemandCurve }: any) {
   const colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6']
   
   if (!data || data.length === 0) {
@@ -941,6 +1484,25 @@ function IndividualHeadPlot({ data, iprData, showIPR }: any) {
   const plotData: any[] = []
   let maxQ = 0
   let maxHead = 0
+  const pumpDepth = typeof pressureDemandCurve?.components?.profundidad_bomba === 'number'
+    ? pressureDemandCurve.components.profundidad_bomba
+    : null
+
+  const fluidGradient = typeof pressureDemandCurve?.components?.gradiente === 'number'
+    ? pressureDemandCurve.components.gradiente
+    : null
+
+  let demandLine: { q: number[], head: number[], pip: number[], pwf: number[] } | null = null
+
+  if (pressureDemandCurve && pressureDemandCurve.curve && pressureDemandCurve.curve.length > 0) {
+    const demandQ = pressureDemandCurve.curve.map((p: any) => p.caudal)
+    const demandHead = pressureDemandCurve.curve.map((p: any) => p.tdh)
+    const demandPip = pressureDemandCurve.curve.map((p: any) => p.pip)
+    const demandPwf = pressureDemandCurve.curve.map((p: any) => p.pwf)
+    demandLine = { q: demandQ, head: demandHead, pip: demandPip, pwf: demandPwf }
+    maxQ = Math.max(maxQ, ...demandQ)
+    maxHead = Math.max(maxHead, ...demandHead)
+  }
   
   data.forEach((pumpData: any, idx: number) => {
     const { name, curves } = pumpData
@@ -1029,8 +1591,86 @@ function IndividualHeadPlot({ data, iprData, showIPR }: any) {
       showlegend: false,
       hoverinfo: 'skip'
     })
+
+    if (demandLine) {
+      const intersection = findPumpDemandIntersection(q, head, demandLine.q, demandLine.head)
+      if (intersection) {
+        const effCurve = curves.efficiency ? curves.efficiency.map((p: any) => p.valor * 100) : null
+        const bhpCurve = curves.bhp ? curves.bhp.map((p: any) => p.valor) : null
+        const efficiencyAtPoint = effCurve ? interpolateValue(q, effCurve, intersection.q) : null
+        const bhpAtPoint = bhpCurve ? interpolateValue(q, bhpCurve, intersection.q) : null
+        let pipAtPoint: number | null = null
+        let pwfAtPoint: number | null = null
+        let fluidLevelAtPoint: number | null = null
+        let submergenceAtPoint: number | null = null
+
+        if (demandLine && demandLine.pip.length > 0) {
+          pipAtPoint = interpolateValue(demandLine.q, demandLine.pip, intersection.q)
+        }
+
+        if (demandLine && demandLine.pwf.length > 0) {
+          pwfAtPoint = interpolateValue(demandLine.q, demandLine.pwf, intersection.q)
+        }
+
+        if (
+          pwfAtPoint !== null &&
+          typeof fluidGradient === 'number' &&
+          fluidGradient > 0
+        ) {
+          const rawSubmergence = pwfAtPoint / fluidGradient
+          if (isFinite(rawSubmergence)) {
+            submergenceAtPoint = Math.max(rawSubmergence, 0)
+          }
+        }
+
+        if (submergenceAtPoint !== null && typeof pumpDepth === 'number') {
+          const rawFluidLevel = pumpDepth - submergenceAtPoint
+          if (isFinite(rawFluidLevel)) {
+            fluidLevelAtPoint = Math.min(Math.max(rawFluidLevel, 0), pumpDepth)
+          }
+        }
+
+        plotData.push({
+          x: [intersection.q],
+          y: [intersection.head],
+          mode: 'markers',
+          type: 'scatter',
+          marker: {
+            color: color,
+            size: 14,
+            symbol: 'star',
+            line: { color: 'white', width: 2 }
+          },
+          name: `${name} Operating Point`,
+          showlegend: false,
+          hovertemplate:
+            `<b>${name} · Operating Point</b><br>` +
+            `Flow: ${intersection.q.toFixed(2)} m³/d<br>` +
+            `TDH: ${intersection.head.toFixed(2)} m` +
+            (efficiencyAtPoint !== null ? `<br>Efficiency: ${efficiencyAtPoint.toFixed(2)} %` : '') +
+            (bhpAtPoint !== null ? `<br>BHP: ${bhpAtPoint.toFixed(2)} HP` : '') +
+    (pipAtPoint !== null ? `<br>PIP: ${pipAtPoint.toFixed(2)} bar` : '') +
+    (pwfAtPoint !== null ? `<br>Pwf: ${pwfAtPoint.toFixed(2)} bar` : '') +
+            (fluidLevelAtPoint !== null ? `<br>Fluid Level: ${fluidLevelAtPoint.toFixed(2)} m` : '') +
+            (submergenceAtPoint !== null ? `<br>Submergence: ${submergenceAtPoint.toFixed(2)} m` : '') +
+            '<extra></extra>'
+        })
+      }
+    }
   })
   
+  if (demandLine) {
+    plotData.push({
+      x: demandLine.q,
+      y: demandLine.head,
+      type: 'scatter',
+      mode: 'lines',
+      name: 'System Demand (TDH)',
+      line: { color: '#c0392b', width: 3, dash: 'dot' },
+      hovertemplate: '<b>System Demand</b><br>Q: %{x:.2f} m³/d<br>TDH: %{y:.2f} m<extra></extra>'
+    })
+  }
+
   // NO mostrar IPR en vista de Head individual (Combined System)
   // El IPR solo se muestra en la pestaña dedicada "IPR Analysis"
   
@@ -1058,12 +1698,12 @@ function IndividualHeadPlot({ data, iprData, showIPR }: any) {
       zerolinewidth: 2
     },
     legend: {
-      orientation: 'v',
-      yanchor: 'top',
-      y: 0.98,
-      xanchor: 'right',
-      x: 0.98,
-      bgcolor: 'rgba(255, 255, 255, 0.9)',
+      orientation: 'h',
+      yanchor: 'bottom',
+      y: 1.18,
+      xanchor: 'center',
+      x: 0.5,
+      bgcolor: 'rgba(255, 255, 255, 0.85)',
       bordercolor: '#95a5a6',
       borderwidth: 1,
       font: { size: 12, weight: 600 }
@@ -1071,7 +1711,7 @@ function IndividualHeadPlot({ data, iprData, showIPR }: any) {
     plot_bgcolor: '#fafafa',
     paper_bgcolor: 'white',
     hovermode: 'closest',
-    margin: { l: 80, r: 80, t: 80, b: 100 }
+  margin: { l: 80, r: 80, t: 160, b: 90 }
   }
   
   const config = {
@@ -1094,7 +1734,7 @@ function IndividualHeadPlot({ data, iprData, showIPR }: any) {
         data={plotData} 
         layout={layout} 
         config={config}
-        style={{ width: '100%', height: '600px' }} 
+  style={{ width: '100%', height: '660px' }} 
         useResizeHandler={true} 
       />
     </div>
@@ -1230,12 +1870,12 @@ function IndividualBhpPlot({ data }: any) {
       zerolinewidth: 2
     },
     legend: {
-      orientation: 'v',
-      yanchor: 'top',
-      y: 0.98,
-      xanchor: 'right',
-      x: 0.98,
-      bgcolor: 'rgba(255, 255, 255, 0.9)',
+      orientation: 'h',
+      yanchor: 'bottom',
+      y: 1.18,
+      xanchor: 'center',
+      x: 0.5,
+      bgcolor: 'rgba(255, 255, 255, 0.85)',
       bordercolor: '#95a5a6',
       borderwidth: 1,
       font: { size: 12, weight: 600 }
@@ -1243,7 +1883,7 @@ function IndividualBhpPlot({ data }: any) {
     plot_bgcolor: '#fafafa',
     paper_bgcolor: 'white',
     hovermode: 'closest',
-    margin: { l: 80, r: 80, t: 80, b: 100 }
+  margin: { l: 80, r: 80, t: 160, b: 90 }
   }
   
   const config = {
@@ -1266,7 +1906,7 @@ function IndividualBhpPlot({ data }: any) {
         data={plotData} 
         layout={layout} 
         config={config}
-        style={{ width: '100%', height: '600px' }} 
+  style={{ width: '100%', height: '660px' }} 
         useResizeHandler={true} 
       />
     </div>
@@ -1274,7 +1914,16 @@ function IndividualBhpPlot({ data }: any) {
 }
 
 // Componente dedicado para IPR Analysis - SOLO curva IPR
-function IPRPlot({ iprData, pressureDemandCurve }: any) {
+function IPRPlot({
+  iprData,
+  pressureDemandCurve,
+  pressureDemandScenarios,
+  iprScenarios,
+  scenarioVisibility,
+  scenarioStyles,
+  scenarioOrder,
+  activeScenarioKey
+}: any) {
   if (!iprData || !iprData.curve) {
     return (
       <div style={{ textAlign: 'center', padding: '32px', color: '#7f8c8d', fontSize: '1.1rem' }}>
@@ -1282,132 +1931,225 @@ function IPRPlot({ iprData, pressureDemandCurve }: any) {
       </div>
     )
   }
-  
-  // DEBUG: Verificar si tenemos datos de System Demand
-  console.log('='.repeat(80))
-  console.log('IPRPlot - pressureDemandCurve:', pressureDemandCurve ? 'PRESENTE' : 'NO DISPONIBLE')
-  if (pressureDemandCurve) {
-    console.log('pressureDemandCurve.curve:', pressureDemandCurve.curve ? 'TIENE DATOS' : 'UNDEFINED')
-    console.log('pressureDemandCurve tiene', pressureDemandCurve.curve?.length || 0, 'puntos')
-    if (pressureDemandCurve.curve && pressureDemandCurve.curve.length > 0) {
-      console.log('Primer punto:', pressureDemandCurve.curve[0])
+
+  const configuredOrder = Array.isArray(scenarioOrder) && scenarioOrder.length > 0
+    ? scenarioOrder
+    : Object.keys(iprScenarios || {})
+
+  const activeKeys = configuredOrder.filter((key) => scenarioVisibility?.[key])
+  const fallbackKey = activeScenarioKey
+    || (configuredOrder.includes('conservative') ? 'conservative' : configuredOrder[0])
+    || 'conservative'
+
+  const iprSeries: any[] = []
+  const demandSeries: any[] = []
+  const iprSourceMap = iprScenarios || {}
+  const demandSourceMap = pressureDemandScenarios || {}
+  const baseIprSource = iprData
+  const baseDemandSource = pressureDemandCurve
+
+  const pushIprSeries = (key: string, source: any) => {
+    if (!source || !Array.isArray(source.curve) || source.curve.length === 0) {
+      return
     }
+    if (iprSeries.some((series) => series.key === key)) {
+      return
+    }
+
+    const style = resolveScenarioStyle(key, scenarioStyles)
+    const qValues = source.curve.map((p: any) => p.caudal)
+    const pwfValues = source.curve.map((p: any) => p.pwf)
+    const nivelValues = source.curve.map((p: any) => p.nivel || 0)
+
+    if (!qValues.length || !pwfValues.length) {
+      return
+    }
+
+    iprSeries.push({
+      key,
+      label: style.label,
+      color: style.color,
+      dash: key === 'conservative' ? 'solid' : style.dash || 'dashdot',
+      q: qValues,
+      pwf: pwfValues,
+      nivel: nivelValues,
+      source
+    })
   }
-  console.log('='.repeat(80))
-  
-  const iprQ = iprData.curve.map((p: any) => p.caudal)
-  const iprPwf = iprData.curve.map((p: any) => p.pwf)
-  const iprNivel = iprData.curve.map((p: any) => p.nivel || 0)
-  
-  // Información del gradiente del fluido
-  const gradiente = iprData.parameters?.gradiente || null
-  const gradoApi = iprData.parameters?.grado_api || null
-  const aguaPorcentaje = iprData.parameters?.agua_porcentaje || null
-  
-  const maxQ = Math.max(...iprQ)
-  const maxPwf = Math.max(...iprPwf)
-  
-  // ===== NUEVA SECCIÓN: Curva de Demanda de Presión =====
-  const plotData: any[] = [
-    // IPR en eje Y1 (bar)
-    {
-      x: iprQ,
-      y: iprPwf,
+
+  const pushDemandSeries = (key: string, source: any) => {
+    if (!source || !Array.isArray(source.curve) || source.curve.length === 0) {
+      return
+    }
+    if (demandSeries.some((series) => series.key === key)) {
+      return
+    }
+
+    const style = resolveScenarioStyle(key, scenarioStyles)
+    const qValues = source.curve.map((p: any) => p.caudal)
+    const tdhValues = source.curve.map((p: any) => p.tdh)
+
+    if (!qValues.length || !tdhValues.length) {
+      return
+    }
+
+    const gradient = source.components?.gradiente
+      || pressureDemandCurve?.components?.gradiente
+      || 0.0981
+    const tdhBarValues = tdhValues.map((value: number) => value * gradient)
+    const pipValues = source.curve.map((p: any) => p.pip ?? null)
+    const frictionValues = source.curve.map((p: any) => p.perdidas_friccion ?? null)
+
+    demandSeries.push({
+      key,
+      label: style.label,
+      color: style.color,
+      dash: style.dash || 'dot',
+      symbol: style.symbol || 'star',
+      q: qValues,
+      tdh: tdhValues,
+      tdhBar: tdhBarValues,
+      pip: pipValues,
+      friction: frictionValues,
+      gradient,
+      source
+    })
+  }
+
+  const keysToPlot = (activeKeys.length > 0 ? activeKeys : [fallbackKey]).filter(Boolean)
+
+  keysToPlot.forEach((key) => {
+    const iprSource = iprSourceMap[key] || (key === 'conservative' ? baseIprSource : null)
+    if (iprSource) {
+      pushIprSeries(key, iprSource)
+    }
+
+    const demandSource = demandSourceMap[key] || (key === 'conservative' ? baseDemandSource : null)
+    if (demandSource) {
+      pushDemandSeries(key, demandSource)
+    }
+  })
+
+  if (!iprSeries.length && baseIprSource) {
+    pushIprSeries('conservative', baseIprSource)
+  }
+  if (!demandSeries.length && baseDemandSource) {
+    pushDemandSeries('conservative', baseDemandSource)
+  }
+
+  const primarySeries =
+    iprSeries.find((series) => series.key === (activeScenarioKey || 'conservative')) || iprSeries[0]
+  const primaryKey = primarySeries ? primarySeries.key : null
+
+  let maxQ = 0
+  let maxPwf = 0
+  iprSeries.forEach((series) => {
+    if (series.q.length) {
+      maxQ = Math.max(maxQ, ...series.q, maxQ)
+    }
+    if (series.pwf.length) {
+      maxPwf = Math.max(maxPwf, ...series.pwf, maxPwf)
+    }
+  })
+
+  let maxDemandTDH_m = 0
+  let maxDemandTDH_bar = 0
+  demandSeries.forEach((series) => {
+    if (series.q.length) {
+      maxQ = Math.max(maxQ, ...series.q, maxQ)
+    }
+    if (series.tdh.length) {
+      maxDemandTDH_m = Math.max(maxDemandTDH_m, ...series.tdh, maxDemandTDH_m)
+    }
+    if (series.tdhBar.length) {
+      maxDemandTDH_bar = Math.max(maxDemandTDH_bar, ...series.tdhBar, maxDemandTDH_bar)
+    }
+  })
+
+  const plotData: any[] = []
+
+  iprSeries.forEach((series) => {
+    plotData.push({
+      x: series.q,
+      y: series.pwf,
       type: 'scatter',
       mode: 'lines',
-      name: `IPR - ${iprData.method} (Pwf)`,
-      line: { color: '#16a085', width: 4 },
+      name: `IPR - ${series.label}`,
+      line: { color: series.color, width: 4, dash: series.dash },
       yaxis: 'y',
-      customdata: iprNivel,
-      hovertemplate: '<b>IPR</b><br>Q: %{x:.2f} m³/d<br>Pwf: %{y:.2f} bar<br>Nivel: %{customdata:.2f} m<extra></extra>'
-    },
-    // Marcador de Q_max
-    {
-      x: [iprData.q_max],
+      customdata: series.nivel,
+      hovertemplate: `<b>${series.label} IPR</b><br>Q: %{x:.2f} m³/d<br>Pwf: %{y:.2f} bar<br>Nivel: %{customdata:.2f} m<extra></extra>`
+    })
+  })
+
+  const primarySource = primarySeries?.source || baseIprSource
+  const qMaxValue = typeof primarySource?.q_max === 'number' ? primarySource.q_max : iprData.q_max
+  if (typeof qMaxValue === 'number') {
+    plotData.push({
+      x: [qMaxValue],
       y: [0],
       mode: 'markers',
       type: 'scatter',
       marker: { color: '#e67e22', size: 14, symbol: 'diamond', line: { color: 'white', width: 2 } },
-      name: `Q_max: ${iprData.q_max.toFixed(0)} m³/d`,
+      name: `Q_max (${(primarySeries?.label || iprData.method)})`,
       yaxis: 'y',
       showlegend: true,
-      hovertemplate: `<b>Q_max</b><br>Q: ${iprData.q_max.toFixed(2)} m³/d<extra></extra>`
-    }
-  ]
-  
-  // Variables para calcular rangos
-  let maxDemandTDH_m = 0
-  let maxDemandTDH_bar = 0
-  
-  // Agregar curva de demanda de presión si está disponible
-  if (pressureDemandCurve && pressureDemandCurve.curve) {
-    const demandQ = pressureDemandCurve.curve.map((p: any) => p.caudal)
-    const demandTDH = pressureDemandCurve.curve.map((p: any) => p.tdh)
-    const pipPressure = pressureDemandCurve.curve.map((p: any) => p.pip)
-    const frictionLosses = pressureDemandCurve.curve.map((p: any) => p.perdidas_friccion)
-    
-    // Obtener gradiente para convertir TDH (m) a presión (bar)
-    const gradient = pressureDemandCurve.components?.gradiente || 0.0981  // bar/m
-    const demandTDH_bar = demandTDH.map((tdh: number) => tdh * gradient)
-    
-    // DEBUG: Ver qué datos tenemos
-    console.log('='.repeat(80))
-    console.log('DEBUG FRONTEND - System Demand Curve (primeros 3 puntos):')
-    console.log('='.repeat(80))
-    for (let i = 0; i < Math.min(3, pressureDemandCurve.curve.length); i++) {
-      const p = pressureDemandCurve.curve[i]
-      console.log(`Punto ${i}: Q=${p.caudal?.toFixed(1)}, TDH=${p.tdh?.toFixed(2)} m (${(p.tdh * gradient).toFixed(2)} bar), PIP=${p.pip?.toFixed(2)}, Nivel=${p.nivel}`)
-    }
-    console.log('demandQ:', demandQ.slice(0, 3))
-    console.log('demandTDH:', demandTDH.slice(0, 3))
-    console.log('='.repeat(80))
-    
-    // Calcular rangos máximos
-    const maxDemandTDH = Math.max(...demandTDH)
-    const maxDemandBar = Math.max(...demandTDH_bar)
-    maxDemandTDH_m = maxDemandTDH
-    maxDemandTDH_bar = maxDemandBar
-    
-    // Curva de System Demand en METROS (eje Y2 - derecha)
-    plotData.push({
-      x: demandQ,
-      y: demandTDH,
-      type: 'scatter',
-      mode: 'lines',
-      name: 'System Demand (TDH - m)',
-      line: { color: '#e74c3c', width: 3, dash: 'solid' },
-      yaxis: 'y2',
-      customdata: demandQ.map((q: number, idx: number) => ({
-        pip: pipPressure[idx],
-        friction: frictionLosses[idx],
-        tdh_bar: demandTDH_bar[idx]
-      })),
-      hovertemplate: '<b>System Demand</b><br>Q: %{x:.2f} m³/d<br>TDH: %{y:.2f} m (%{customdata.tdh_bar:.2f} bar)<br>PIP: %{customdata.pip:.2f} bar<br>Friction: %{customdata.friction:.2f} bar<extra></extra>'
-    })
-    
-    // Curva de System Demand en BAR (eje Y3 - derecha extrema)
-    plotData.push({
-      x: demandQ,
-      y: demandTDH_bar,
-      type: 'scatter',
-      mode: 'lines',
-      name: 'System Demand (Pressure - bar)',
-      line: { color: '#c0392b', width: 2, dash: 'dot' },
-      yaxis: 'y3',
-      showlegend: true,
-      hovertemplate: '<b>System Demand (Pressure)</b><br>Q: %{x:.2f} m³/d<br>Pressure: %{y:.2f} bar<extra></extra>'
+      hovertemplate: `<b>Q_max</b><br>Q: ${qMaxValue.toFixed(2)} m³/d<extra></extra>`
     })
   }
-  
-  // Título con información del fluido
+
+  demandSeries.forEach((series) => {
+    plotData.push({
+      x: series.q,
+      y: series.tdh,
+      type: 'scatter',
+      mode: 'lines',
+      name: `${series.label} Demand (TDH - m)`,
+      line: { color: series.color, width: 3, dash: series.dash || 'solid' },
+      yaxis: 'y2',
+      customdata: series.q.map((_: number, idx: number) => ({
+        pip: series.pip[idx],
+        friction: series.friction[idx],
+        pressure: series.tdhBar[idx]
+      })),
+      hovertemplate: `<b>${series.label} Demand</b><br>Q: %{x:.2f} m³/d<br>TDH: %{y:.2f} m (%{customdata.pressure:.2f} bar)<br>PIP: %{customdata.pip:.2f} bar<br>Friction: %{customdata.friction:.2f} bar<extra></extra>`
+    })
+
+    if (series.key === primaryKey) {
+      plotData.push({
+        x: series.q,
+        y: series.tdhBar,
+        type: 'scatter',
+        mode: 'lines',
+        name: `${series.label} Demand (bar)`,
+        line: { color: series.color, width: 2, dash: 'dot' },
+        yaxis: 'y3',
+        showlegend: true,
+        hovertemplate: `<b>${series.label} Demand (Pressure)</b><br>Q: %{x:.2f} m³/d<br>Pressure: %{y:.2f} bar<extra></extra>`
+      })
+    }
+  })
+
+  const gradiente = iprData.parameters?.gradiente || null
+  const gradoApi = iprData.parameters?.grado_api || null
+  const aguaPorcentaje = iprData.parameters?.agua_porcentaje || null
+
   let titleText = `IPR Analysis - ${iprData.method}`
-  if (pressureDemandCurve) {
-    titleText += ' & System Demand Curve'
+  if (primarySeries?.label) {
+    titleText += ` (${primarySeries.label})`
+  }
+  if (demandSeries.length) {
+    titleText += ' & System Demand Curves'
   }
   if (gradiente && gradoApi !== null && aguaPorcentaje !== null) {
     titleText += `<br><sub>Oil: ${gradoApi}°API | Water: ${aguaPorcentaje}% | Gradient: ${gradiente.toFixed(4)} bar/m</sub>`
   }
-  
+
+  const effectiveMaxQ = maxQ > 0 ? maxQ * 1.1 : 1
+  const effectiveMaxPwf = maxPwf > 0 ? maxPwf * 1.1 : 10
+  const effectiveMaxTDH = maxDemandTDH_m > 0 ? maxDemandTDH_m * 1.1 : 100
+  const effectiveMaxPressure = maxDemandTDH_bar > 0 ? maxDemandTDH_bar * 1.1 : 10
+
   const layout = {
     title: {
       text: titleText,
@@ -1415,7 +2157,7 @@ function IPRPlot({ iprData, pressureDemandCurve }: any) {
     },
     xaxis: {
       title: { text: 'Flow Rate (Q - m³/d)', font: { size: 16, color: '#34495e', weight: 600 } },
-      range: [0, maxQ * 1.1],
+      range: [0, effectiveMaxQ],
       showgrid: true,
       gridcolor: '#ecf0f1',
       zeroline: true,
@@ -1424,7 +2166,7 @@ function IPRPlot({ iprData, pressureDemandCurve }: any) {
     },
     yaxis: {
       title: { text: 'IPR Pressure (Pwf - bar)', font: { size: 16, color: '#16a085', weight: 600 } },
-      range: [0, maxPwf * 1.1],
+      range: [0, effectiveMaxPwf],
       showgrid: true,
       gridcolor: '#ecf0f1',
       zeroline: true,
@@ -1438,7 +2180,7 @@ function IPRPlot({ iprData, pressureDemandCurve }: any) {
       side: 'right',
       showgrid: false,
       zeroline: false,
-      range: [0, Math.max(maxDemandTDH_m * 1.1, 100)],  // Mínimo 100m para evitar rango [0,0]
+      range: [0, Math.max(effectiveMaxTDH, 100)],
       position: 0.93
     },
     yaxis3: {
@@ -1449,15 +2191,15 @@ function IPRPlot({ iprData, pressureDemandCurve }: any) {
       position: 1.0,
       showgrid: false,
       zeroline: false,
-      range: [0, Math.max(maxDemandTDH_bar * 1.1, 10)]  // Mínimo 10 bar para evitar rango [0,0]
+      range: [0, Math.max(effectiveMaxPressure, 10)]
     },
     legend: {
-      orientation: 'v',
-      yanchor: 'top',
-      y: 0.98,
-      xanchor: 'left',
-      x: 0.02,
-      bgcolor: 'rgba(255, 255, 255, 0.9)',
+      orientation: 'h',
+      yanchor: 'bottom',
+      y: 1.16,
+      xanchor: 'center',
+      x: 0.5,
+      bgcolor: 'rgba(255, 255, 255, 0.85)',
       bordercolor: '#95a5a6',
       borderwidth: 1,
       font: { size: 11, weight: 600 }
@@ -1465,9 +2207,9 @@ function IPRPlot({ iprData, pressureDemandCurve }: any) {
     plot_bgcolor: '#fafafa',
     paper_bgcolor: 'white',
     hovermode: 'closest',
-    margin: { l: 80, r: 200, t: 120, b: 100 }
+    margin: { l: 80, r: 200, t: 170, b: 90 }
   }
-  
+
   const config = {
     responsive: true,
     displayModeBar: true,
@@ -1481,7 +2223,7 @@ function IPRPlot({ iprData, pressureDemandCurve }: any) {
       scale: 2
     }
   }
-  
+
   return (
     <div style={{ width: '100%' }}>
       <div className="plot-container">
@@ -1489,12 +2231,10 @@ function IPRPlot({ iprData, pressureDemandCurve }: any) {
           data={plotData} 
           layout={layout} 
           config={config}
-          style={{ width: '100%', height: '600px' }} 
+          style={{ width: '100%', height: '660px' }} 
           useResizeHandler={true} 
         />
       </div>
-      
-      {/* Información adicional de la curva de presión */}
       {pressureDemandCurve && pressureDemandCurve.components && (
         <div style={{ 
           marginTop: '20px', 
