@@ -1,0 +1,254 @@
+# --- app.py ---
+# Servidor Principal de la API (Flask)
+# -------------------------------------
+
+from flask import Flask, request, jsonify
+from flask_cors import CORS  # Necesario para permitir la comunicación con el front-end (React)
+from flask import send_file, make_response
+import io
+
+# Importamos nuestros módulos de cálculo
+import well_performance
+import hydraulic_calculations
+import gas_effects
+import equipment_selection
+import engineering_validation
+import tubing_catalog
+
+app = Flask(__name__)
+# Configuramos CORS para permitir peticiones desde nuestro front-end
+CORS(app)
+
+@app.route('/api/calculate_conditions', methods=['POST'])
+def calculate_conditions():
+    """
+    Etapa A: Cálculo de Condiciones.
+    Recibe los datos del pozo y calcula el IPR, TDH y curva de demanda de presión.
+    """
+    try:
+        well_data = request.json
+        
+        # Convertir rugosidad de string a valor numérico
+        if 'tubing_roughness' in well_data:
+            roughness_key = well_data['tubing_roughness']
+            roughness_map = tubing_catalog.get_roughness_options()
+            well_data['tubing_roughness_mm'] = roughness_map.get(roughness_key, 0.046)  # Default: acero nuevo
+        
+        # 1. Calcular IPR (Aporte del pozo)
+        ipr_result = well_performance.calculate_ipr(well_data)
+        
+        # 2. Calcular TDH (Carga Dinámica Total)
+        system_head_curve = hydraulic_calculations.calculate_system_head_curve(well_data)
+
+        # 3. Calcular curva de demanda de presión (Presión vs Caudal)
+        # Pasamos el IPR para usar la presión de intake real en cada caudal
+        pressure_demand_curve = hydraulic_calculations.calculate_pressure_demand_curve(well_data, ipr_result)
+        
+        # DEBUG: Imprimir primeros 3 puntos de la curva de demanda
+        print("\n" + "="*80)
+        print("DEBUG API - CURVA DE DEMANDA (primeros 3 puntos enviados al frontend):")
+        print("="*80)
+        for i, point in enumerate(pressure_demand_curve['curve'][:3]):
+            print(f"Punto {i}: Q={point['caudal']:.1f} m3/d, TDH={point['tdh']:.2f} m, PIP={point['pip']:.2f} bar, Nivel={point.get('nivel', 'N/A')}")
+        print("="*80 + "\n")
+
+        # 4. Aplicar correcciones por gas si es necesario
+        gas_corrections = gas_effects.get_gas_corrections(well_data)
+
+        return jsonify({
+            "success": True,
+            "ipr_data": ipr_result,
+            "system_head_curve": system_head_curve,
+            "pressure_demand_curve": pressure_demand_curve,
+            "gas_corrections": gas_corrections
+        }), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/validate_design', methods=['POST'])
+def validate_design():
+    """
+    Etapa B: Validación del Diseño Completo.
+    Recibe los datos del pozo + la configuración de equipo seleccionada por el ingeniero.
+    Devuelve la validación completa y los puntos para las curvas de rendimiento.
+    """
+    try:
+        data = request.json
+        well_data = data.get('well_data')
+        selected_equipment = data.get('selected_equipment') # IDs de bomba, motor, cable, etc.
+
+        # 1. Validar el diseño completo
+        validation_results = engineering_validation.validate_full_design(
+            well_data, 
+            selected_equipment
+        )
+
+        # 2. Obtener curvas de rendimiento del equipo seleccionado
+        pump_curves = equipment_selection.get_pump_performance_curves(
+            selected_equipment.get('pump_id')
+        )
+        if isinstance(pump_curves, dict) and 'error' in pump_curves:
+            return jsonify({"success": False, "error": pump_curves['error']}), 404
+
+        motor_curves = equipment_selection.get_motor_performance_curves(
+            selected_equipment.get('motor_id')
+        )
+        if isinstance(motor_curves, dict) and 'error' in motor_curves:
+            return jsonify({"success": False, "error": motor_curves['error']}), 404
+
+        return jsonify({
+            "success": True,
+            "validation": validation_results,
+            "performance_curves": {
+                "pump": pump_curves,
+                "motor": motor_curves
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/catalogs', methods=['GET'])
+def get_catalogs():
+    """
+    Endpoint para que el front-end obtenga la lista completa de equipos.
+    """
+    try:
+        pumps = equipment_selection.get_pump_catalog()
+        motors = equipment_selection.get_motor_catalog()
+        # ... otros catálogos (cables, protectores, etc.)
+
+        return jsonify({
+            "success": True,
+            "catalogs": {
+                "pumps": pumps,
+                "motors": motors
+            }
+        }), 200
+    
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/column-mapping', methods=['GET'])
+def column_mapping():
+    """Devuelve el mapeo detectado de columnas para los catálogos cargados."""
+    try:
+        mapping = equipment_selection.get_column_mapping()
+        return jsonify({"success": True, "mapping": mapping}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/pumps', methods=['GET'])
+def list_pumps():
+    """Devuelve la lista simple de bombas (array) para uso del frontend."""
+    try:
+        pumps = equipment_selection.get_pump_catalog()
+        return jsonify(pumps), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/pumps/<pump_id>/curves', methods=['GET'])
+def pump_curves(pump_id):
+    """Devuelve curvas de una bomba: raw y scaled. Parámetros query: freq (Hz), stages (int), points (int), plot (bool)."""
+    try:
+        freq = float(request.args.get('freq', 50.0))
+        stages = int(request.args.get('stages', 300))
+        points = int(request.args.get('points', 300))
+        plot = request.args.get('plot', '0') in ('1', 'true', 'True')
+
+        curves = equipment_selection.get_pump_performance_curves(pump_id, freq_hz=freq, stages=stages, n_points=points)
+        if isinstance(curves, dict) and 'error' in curves:
+            return jsonify({"success": False, "error": curves['error']}), 404
+
+        if not plot:
+            return jsonify({"success": True, "pump_id": pump_id, "curves": curves}), 200
+
+        # Generar PNG en memoria con matplotlib
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+
+            qs = [p['caudal'] for p in curves['head']]
+            hs = [p['valor'] for p in curves['head']]
+            ps = [p['valor'] for p in curves['bhp']]
+            es = [p['valor'] for p in curves['efficiency']]
+
+            hs_raw = [p['valor'] for p in curves.get('head_raw', [])]
+            ps_raw = [p['valor'] for p in curves.get('bhp_raw', [])]
+            es_raw = [p['valor'] for p in curves.get('efficiency_raw', [])]
+
+            fig, ax1 = plt.subplots(figsize=(10, 6))
+            ax1.plot(qs, hs, '-o', color='tab:blue', label='Head (scaled)')
+            if hs_raw:
+                ax1.plot(qs, hs_raw, '--', color='tab:blue', alpha=0.6, label='Head (raw)')
+            ax1.set_xlabel('Q')
+            ax1.set_ylabel('Head (m)', color='tab:blue')
+            ax1.tick_params(axis='y', labelcolor='tab:blue')
+
+            ax2 = ax1.twinx()
+            ax2.plot(qs, ps, '-s', color='tab:red', label='BHP (scaled)')
+            if ps_raw:
+                ax2.plot(qs, ps_raw, '--', color='tab:red', alpha=0.6, label='BHP (raw)')
+            ax2.set_ylabel('BHP (hp)', color='tab:red')
+            ax2.tick_params(axis='y', labelcolor='tab:red')
+
+            ax3 = ax1.twinx()
+            ax3.spines['right'].set_position(('outward', 60))
+            ax3.plot(qs, es, '-^', color='tab:green', label='Efficiency (scaled)')
+            if es_raw:
+                ax3.plot(qs, es_raw, '--', color='tab:green', alpha=0.6, label='Efficiency (raw)')
+            ax3.set_ylabel('Efficiency', color='tab:green')
+            ax3.tick_params(axis='y', labelcolor='tab:green')
+
+            lines, labels = ax1.get_legend_handles_labels()
+            l2, l2l = ax2.get_legend_handles_labels()
+            l3, l3l = ax3.get_legend_handles_labels()
+            ax1.legend(lines + l2 + l3, labels + l2l + l3l, loc='upper right')
+
+            plt.title(f"Curvas bomba {pump_id}")
+            fig.tight_layout()
+
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png', dpi=150)
+            plt.close(fig)
+            buf.seek(0)
+
+            return send_file(buf, mimetype='image/png', as_attachment=False, download_name=f"{pump_id}_curves.png")
+
+        except Exception as e:
+            return jsonify({"success": False, "error": f"Error al generar gráfica: {e}"}), 500
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/tubing-catalog', methods=['GET'])
+def get_tubing_catalog():
+    """
+    Devuelve el catálogo de tuberías de producción estándar.
+    """
+    try:
+        catalog = tubing_catalog.get_tubing_catalog()
+        roughness_options = tubing_catalog.get_roughness_options()
+        
+        return jsonify({
+            "success": True,
+            "catalog": catalog,
+            "roughness_options": roughness_options
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+if __name__ == '__main__':
+    # Cargamos los catálogos en memoria al iniciar la app
+    equipment_selection.load_catalogs()
+    print("Catálogos de equipos cargados.")
+    # Ejecutamos la app en modo debug (para desarrollo)
+    app.run(debug=True, port=5000)
+

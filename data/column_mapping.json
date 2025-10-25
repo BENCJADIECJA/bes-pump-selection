@@ -1,0 +1,41 @@
+{
+  "pump_sheet": "BOMBA",
+  "motor_sheet": "MOTOR",
+  "pump_id_col": "Bomba",
+  "pump_min_q_col": "min",
+  "pump_max_q_col": "max",
+  "pump_head_coeffs": [
+    "hpoly0",
+    "hpoly1",
+    "hpoly2",
+    "hpoly3",
+    "hpoly4",
+    "hpoly5",
+    "hpoly6",
+    "hpoly7",
+    "hpoly8",
+    "hpoly9",
+    "hpoly10"
+  ],
+  "pump_bhp_coeffs": [
+    "npoly0",
+    "npoly1",
+    "npoly2",
+    "npoly3",
+    "npoly4",
+    "npoly5",
+    "npoly6",
+    "npoly7",
+    "npoly8",
+    "npoly9"
+  ],
+  "pump_eff_coeffs": [
+    "C-E-A",
+    "C-E-B",
+    "C-E-C"
+  ],
+  "motor_id_col": "Tipo motor",
+  "motor_hp_col": "HP NOM",
+  "motor_amps_col": "AMP NOM",
+  "motor_voltage_col": "VOLT NOM"
+}

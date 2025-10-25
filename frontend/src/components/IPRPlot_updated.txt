@@ -1,0 +1,182 @@
+// Componente dedicado para IPR Analysis
+function IPRPlot({ iprData, pumpCurves }: any) {
+  const [showPumpOverlay, setShowPumpOverlay] = React.useState(false)
+  
+  if (!iprData || !iprData.curve) {
+    return (
+      <div style={{ textAlign: 'center', padding: '32px', color: '#7f8c8d', fontSize: '1.1rem' }}>
+        📊 Configure IPR parameters to see the well performance curve
+      </div>
+    )
+  }
+  
+  const iprQ = iprData.curve.map((p: any) => p.caudal)
+  const iprPwf = iprData.curve.map((p: any) => p.pwf)
+  const iprNivel = iprData.curve.map((p: any) => p.nivel || 0)
+  
+  // Mostrar información del gradiente si está disponible
+  const gradiente = iprData.parameters?.gradiente || null
+  const gradoApi = iprData.parameters?.grado_api || null
+  const aguaPorcentaje = iprData.parameters?.agua_porcentaje || null
+  
+  const plotData: any[] = [
+    {
+      x: iprQ,
+      y: iprNivel,
+      type: 'scatter',
+      mode: 'lines',
+      name: `IPR - ${iprData.method}`,
+      line: { color: '#16a085', width: 4 },
+      customdata: iprPwf,
+      hovertemplate: '<b>IPR</b><br>Q: %{x:.2f} m³/d<br>Nivel: %{y:.2f} m<br>Pwf: %{customdata:.2f} bar<extra></extra>'
+    }
+  ]
+  
+  let maxQ = Math.max(...iprQ)
+  let maxNivel = Math.max(...iprNivel)
+  
+  // Agregar curva de bomba si el overlay está habilitado
+  if (showPumpOverlay && pumpCurves && pumpCurves.head) {
+    const pumpQ = pumpCurves.head.map((p: any) => p.caudal)
+    const pumpHead = pumpCurves.head.map((p: any) => p.valor)
+    
+    maxQ = Math.max(maxQ, ...pumpQ)
+    maxNivel = Math.max(maxNivel, ...pumpHead)
+    
+    plotData.push({
+      x: pumpQ,
+      y: pumpHead,
+      type: 'scatter',
+      mode: 'lines',
+      name: 'Pump Curve (TDH)',
+      line: { color: '#3498db', width: 3, dash: 'dash' },
+      hovertemplate: '<b>Pump</b><br>Q: %{x:.2f} m³/d<br>Head: %{y:.2f} m<extra></extra>'
+    })
+    
+    // Calcular punto de operación
+    const operatingPoint = findOperatingPoint(pumpQ, pumpHead, iprQ, iprNivel)
+    if (operatingPoint) {
+      plotData.push({
+        x: [operatingPoint.q],
+        y: [operatingPoint.head],
+        mode: 'markers',
+        type: 'scatter',
+        marker: { color: '#c0392b', size: 16, symbol: 'star', line: { color: 'white', width: 2 } },
+        name: 'Operating Point',
+        showlegend: true,
+        hovertemplate: `<b>Operating Point</b><br>Q: ${operatingPoint.q.toFixed(2)} m³/d<br>Nivel: ${operatingPoint.head.toFixed(2)} m<extra></extra>`
+      })
+    }
+  }
+  
+  // Marcador de Q_max
+  plotData.push({
+    x: [iprData.q_max],
+    y: [0],
+    mode: 'markers',
+    type: 'scatter',
+    marker: { color: '#e67e22', size: 14, symbol: 'diamond', line: { color: 'white', width: 2 } },
+    name: `Q_max: ${iprData.q_max.toFixed(0)} m³/d`,
+    showlegend: true,
+    hovertemplate: `<b>Q_max</b><br>Q: ${iprData.q_max.toFixed(2)} m³/d<extra></extra>`
+  })
+  
+  // Título con información del fluido
+  let titleText = `IPR Analysis - ${iprData.method}`
+  if (gradiente && gradoApi !== null && aguaPorcentaje !== null) {
+    titleText += `<br><sub>Oil: ${gradoApi}°API | Water: ${aguaPorcentaje}% | Gradient: ${gradiente.toFixed(4)} bar/m</sub>`
+  }
+  
+  const layout = {
+    title: {
+      text: titleText,
+      font: { size: 24, color: '#2c3e50', family: 'Segoe UI, sans-serif', weight: 700 }
+    },
+    xaxis: {
+      title: { text: 'Flow Rate (Q - m³/d)', font: { size: 16, color: '#34495e', weight: 600 } },
+      range: [0, maxQ * 1.1],
+      showgrid: true,
+      gridcolor: '#ecf0f1',
+      zeroline: true,
+      zerolinecolor: '#95a5a6',
+      zerolinewidth: 2
+    },
+    yaxis: {
+      title: { text: 'Fluid Level (m)', font: { size: 16, color: '#16a085', weight: 600 } },
+      range: [0, maxNivel * 1.1],
+      showgrid: true,
+      gridcolor: '#ecf0f1',
+      zeroline: true,
+      zerolinecolor: '#95a5a6',
+      zerolinewidth: 2
+    },
+    legend: {
+      orientation: 'v',
+      yanchor: 'top',
+      y: 0.98,
+      xanchor: 'right',
+      x: 0.98,
+      bgcolor: 'rgba(255, 255, 255, 0.9)',
+      bordercolor: '#95a5a6',
+      borderwidth: 1,
+      font: { size: 12, weight: 600 }
+    },
+    plot_bgcolor: '#fafafa',
+    paper_bgcolor: 'white',
+    hovermode: 'closest',
+    margin: { l: 80, r: 80, t: 120, b: 100 }
+  }
+  
+  const config = {
+    responsive: true,
+    displayModeBar: true,
+    displaylogo: false,
+    modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+    toImageButtonOptions: {
+      format: 'png',
+      filename: 'ipr_analysis',
+      height: 800,
+      width: 1200,
+      scale: 2
+    }
+  }
+  
+  return (
+    <div style={{ width: '100%' }}>
+      <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+        <label style={{ 
+          display: 'inline-flex', 
+          alignItems: 'center', 
+          gap: '10px',
+          padding: '10px 20px',
+          background: showPumpOverlay ? 'linear-gradient(90deg, #3498db 0%, #2980b9 100%)' : 'linear-gradient(90deg, #95a5a6 0%, #7f8c8d 100%)',
+          color: 'white',
+          borderRadius: '8px',
+          cursor: 'pointer',
+          fontWeight: 600,
+          fontSize: '1rem',
+          border: showPumpOverlay ? '2px solid #2980b9' : '2px solid #7f8c8d',
+          transition: 'all 0.3s'
+        }}>
+          <input 
+            type="checkbox" 
+            checked={showPumpOverlay} 
+            onChange={(e) => setShowPumpOverlay(e.target.checked)}
+            style={{ width: 20, height: 20, accentColor: '#3498db' }}
+          />
+          <span>📈 Overlay Pump Curve</span>
+        </label>
+      </div>
+      
+      <div className="plot-container">
+        <Plot 
+          data={plotData} 
+          layout={layout} 
+          config={config}
+          style={{ width: '100%', height: '600px' }} 
+          useResizeHandler={true} 
+        />
+      </div>
+    </div>
+  )
+}
