@@ -405,7 +405,9 @@ export default function App() {
     presionSuperficie,
     presionCasing,
     tubingIdMm,
-    tubingRoughness
+    tubingRoughness,
+    // IMPORTANTE: Recalcular cuando cambia el número de bombas
+    numPumpsDesign
   ])
   
   // useEffect para actualizar curvas en modo comparador
@@ -1027,6 +1029,9 @@ export default function App() {
                       Well productivity analysis with optional pump curve overlay
                     </p>
                   </div>
+                  {/* DEBUG: Log antes de renderizar */}
+                  {console.log('🔍 Renderizando IPR Tab - pressureDemandCurve:', pressureDemandCurve ? 'PRESENTE' : 'NULL')}
+                  {console.log('🔍 Renderizando IPR Tab - numPumpsDesign:', numPumpsDesign)}
                   <CurvePlot 
                     curves={null}
                     isIPRMode={true}
