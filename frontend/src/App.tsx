@@ -87,8 +87,7 @@ export default function App() {
   const [pressureDemandCurve, setPressureDemandCurve] = useState<any>(null)
 
   // Estados para Installation Design (FASE 1)
-  const [profundidadIntake, setProfundidadIntake] = useState(1500)  // m
-  const [nivelFluidoDinamico, setNivelFluidoDinamico] = useState(500)  // m
+  const [profundidadIntake, setProfundidadIntake] = useState(2000)  // m
   const [tubingSelected, setTubingSelected] = useState('Tbg 2-7/8"')
   const [tubingIdMm, setTubingIdMm] = useState(62.0)  // mm
   const [tubingRoughness, setTubingRoughness] = useState('acero_nuevo')
@@ -333,7 +332,6 @@ export default function App() {
         n_points: points,
         // Parámetros de instalación (FASE 1)
         profundidad_intake: profundidadIntake,
-        nivel_fluido_dinamico: nivelFluidoDinamico,
         presion_superficie: presionSuperficie,
         presion_casing: presionCasing,
         tubing_id_mm: tubingIdMm,
@@ -402,7 +400,6 @@ export default function App() {
     points,
     // Parámetros de instalación para System Demand Curve
     profundidadIntake,
-    nivelFluidoDinamico,
     presionSuperficie,
     presionCasing,
     tubingIdMm,
@@ -803,8 +800,6 @@ export default function App() {
             setPresionSuperficie={setPresionSuperficie}
             presionCasing={presionCasing}
             setPresionCasing={setPresionCasing}
-            nivelFluidoDinamico={nivelFluidoDinamico}
-            setNivelFluidoDinamico={setNivelFluidoDinamico}
           />
         </>
       )}

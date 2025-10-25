@@ -23,8 +23,6 @@ interface InstallationControlsProps {
   setPresionSuperficie: (value: number) => void
   presionCasing: number
   setPresionCasing: (value: number) => void
-  nivelFluidoDinamico: number
-  setNivelFluidoDinamico: (value: number) => void
 }
 
 export default function InstallationControls(props: InstallationControlsProps) {
@@ -34,8 +32,7 @@ export default function InstallationControls(props: InstallationControlsProps) {
     tubingIdMm, setTubingIdMm,
     tubingRoughness, setTubingRoughness,
     presionSuperficie, setPresionSuperficie,
-    presionCasing, setPresionCasing,
-    nivelFluidoDinamico, setNivelFluidoDinamico
+    presionCasing, setPresionCasing
   } = props
 
   const [tubingCatalog, setTubingCatalog] = useState<TubingOption[]>([])
@@ -90,37 +87,22 @@ export default function InstallationControls(props: InstallationControlsProps) {
           </div>
         ) : (
           <>
-            {/* Fila 1: Profundidades */}
+            {/* Fila 1: Profundidad de la bomba */}
             <div style={{ marginBottom: '15px', padding: '12px', background: 'rgba(52, 152, 219, 0.1)', borderRadius: '6px', border: '1px solid rgba(52, 152, 219, 0.3)' }}>
-              <h4 style={{ margin: '0 0 10px 0', color: '#3498db', fontSize: '0.95rem' }}>📏 Profundidades</h4>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                  <span style={{ fontWeight: 600, color: '#34495e' }}>Profundidad Intake (m):</span>
-                  <input
-                    type="number"
-                    value={profundidadIntake}
-                    onChange={(e) => setProfundidadIntake(Number(e.target.value))}
-                    min="100"
-                    max="5000"
-                    step="10"
-                    style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
-                    title="Profundidad de instalación del intake de la bomba desde superficie"
-                  />
-                </label>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                  <span style={{ fontWeight: 600, color: '#34495e' }}>Nivel Fluido Dinámico (m):</span>
-                  <input
-                    type="number"
-                    value={nivelFluidoDinamico}
-                    onChange={(e) => setNivelFluidoDinamico(Number(e.target.value))}
-                    min="0"
-                    max={profundidadIntake}
-                    step="10"
-                    style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
-                    title="Nivel de fluido dinámico (profundidad desde superficie al nivel de fluido)"
-                  />
-                </label>
-              </div>
+              <h4 style={{ margin: '0 0 10px 0', color: '#3498db', fontSize: '0.95rem' }}>📏 Profundidad</h4>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                <span style={{ fontWeight: 600, color: '#34495e' }}>Profundidad Intake (m):</span>
+                <input
+                  type="number"
+                  value={profundidadIntake}
+                  onChange={(e) => setProfundidadIntake(Number(e.target.value))}
+                  min="100"
+                  max="5000"
+                  step="10"
+                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white', maxWidth: '280px' }}
+                  title="Profundidad de instalación del intake de la bomba desde superficie"
+                />
+              </label>
             </div>
 
             {/* Fila 2: Tubería de Producción */}
