@@ -308,6 +308,7 @@ export default function App() {
   
   // Función para calcular IPR
   async function fetchIPR() {
+    console.log('🚀 fetchIPR() llamado - numPumpsDesign:', numPumpsDesign)
     setLoading(true)
     setError(null)
     try {
@@ -1029,17 +1030,23 @@ export default function App() {
                       Well productivity analysis with optional pump curve overlay
                     </p>
                   </div>
-                  {/* DEBUG: Log antes de renderizar */}
-                  {console.log('🔍 Renderizando IPR Tab - pressureDemandCurve:', pressureDemandCurve ? 'PRESENTE' : 'NULL')}
-                  {console.log('🔍 Renderizando IPR Tab - numPumpsDesign:', numPumpsDesign)}
-                  <CurvePlot 
-                    curves={null}
-                    isIPRMode={true}
-                    iprData={iprData}
-                    showIPR={true}
-                    pumpCurves={combinedCurves}
-                    pressureDemandCurve={pressureDemandCurve}
-                  />
+                  
+                  {/* Solo renderizar si tenemos AMBOS: iprData Y pressureDemandCurve */}
+                  {iprData && pressureDemandCurve ? (
+                    <CurvePlot 
+                      curves={null}
+                      isIPRMode={true}
+                      iprData={iprData}
+                      showIPR={true}
+                      pumpCurves={combinedCurves}
+                      pressureDemandCurve={pressureDemandCurve}
+                    />
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '40px', color: '#7f8c8d' }}>
+                      {!iprData && <p>⏳ Calculando IPR...</p>}
+                      {iprData && !pressureDemandCurve && <p>⏳ Calculando System Demand Curve...</p>}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
