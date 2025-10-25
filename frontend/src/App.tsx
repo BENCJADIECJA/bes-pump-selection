@@ -343,12 +343,26 @@ export default function App() {
       const res = await axios.post('/api/calculate_conditions', wellData)
       const payload = res.data || {}
       
+      // DEBUG: Verificar respuesta del backend
+      console.log('===== RESPUESTA API calculate_conditions =====')
+      console.log('payload.success:', payload.success)
+      console.log('payload.ipr_data:', payload.ipr_data ? 'PRESENTE' : 'NO')
+      console.log('payload.pressure_demand_curve:', payload.pressure_demand_curve ? 'PRESENTE' : 'NO')
+      if (payload.pressure_demand_curve) {
+        console.log('pressure_demand_curve.curve tiene', payload.pressure_demand_curve.curve?.length || 0, 'puntos')
+        console.log('Primeros 3 puntos:', payload.pressure_demand_curve.curve?.slice(0, 3))
+      }
+      console.log('==============================================')
+      
       if (payload.success && payload.ipr_data) {
         setIprData(payload.ipr_data)
         
         // Guardar curva de demanda de presión si está disponible
         if (payload.pressure_demand_curve) {
           setPressureDemandCurve(payload.pressure_demand_curve)
+          console.log('✅ pressureDemandCurve guardado en el estado')
+        } else {
+          console.log('⚠️ NO se recibió pressure_demand_curve del backend')
         }
       } else {
         setError('Error calculating IPR')

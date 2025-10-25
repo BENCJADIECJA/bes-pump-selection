@@ -1284,10 +1284,16 @@ function IPRPlot({ iprData, pressureDemandCurve }: any) {
   }
   
   // DEBUG: Verificar si tenemos datos de System Demand
+  console.log('='.repeat(80))
   console.log('IPRPlot - pressureDemandCurve:', pressureDemandCurve ? 'PRESENTE' : 'NO DISPONIBLE')
   if (pressureDemandCurve) {
+    console.log('pressureDemandCurve.curve:', pressureDemandCurve.curve ? 'TIENE DATOS' : 'UNDEFINED')
     console.log('pressureDemandCurve tiene', pressureDemandCurve.curve?.length || 0, 'puntos')
+    if (pressureDemandCurve.curve && pressureDemandCurve.curve.length > 0) {
+      console.log('Primer punto:', pressureDemandCurve.curve[0])
+    }
   }
+  console.log('='.repeat(80))
   
   const iprQ = iprData.curve.map((p: any) => p.caudal)
   const iprPwf = iprData.curve.map((p: any) => p.pwf)
@@ -1432,7 +1438,7 @@ function IPRPlot({ iprData, pressureDemandCurve }: any) {
       side: 'right',
       showgrid: false,
       zeroline: false,
-      range: [0, maxDemandTDH_m * 1.1],
+      range: [0, Math.max(maxDemandTDH_m * 1.1, 100)],  // Mínimo 100m para evitar rango [0,0]
       position: 0.93
     },
     yaxis3: {
@@ -1443,7 +1449,7 @@ function IPRPlot({ iprData, pressureDemandCurve }: any) {
       position: 1.0,
       showgrid: false,
       zeroline: false,
-      range: [0, maxDemandTDH_bar * 1.1]
+      range: [0, Math.max(maxDemandTDH_bar * 1.1, 10)]  // Mínimo 10 bar para evitar rango [0,0]
     },
     legend: {
       orientation: 'v',
