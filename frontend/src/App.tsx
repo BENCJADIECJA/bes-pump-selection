@@ -881,6 +881,7 @@ export default function App() {
                     isIPRMode={true}
                     iprData={iprData}
                     showIPR={true}
+                    pressureDemandCurve={pressureDemandCurve}
                   />
                 </div>
               )}
