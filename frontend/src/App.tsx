@@ -1031,8 +1031,8 @@ export default function App() {
                     </p>
                   </div>
                   
-                  {/* Solo renderizar si tenemos AMBOS: iprData Y pressureDemandCurve */}
-                  {iprData && pressureDemandCurve ? (
+                  {/* Renderizar si tenemos iprData (pressureDemandCurve es opcional) */}
+                  {iprData ? (
                     <CurvePlot 
                       curves={null}
                       isIPRMode={true}
@@ -1043,8 +1043,7 @@ export default function App() {
                     />
                   ) : (
                     <div style={{ textAlign: 'center', padding: '40px', color: '#7f8c8d' }}>
-                      {!iprData && <p>⏳ Calculando IPR...</p>}
-                      {iprData && !pressureDemandCurve && <p>⏳ Calculando System Demand Curve...</p>}
+                      <p>⏳ Calculando IPR...</p>
                     </div>
                   )}
                 </div>
