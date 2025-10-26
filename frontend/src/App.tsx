@@ -186,6 +186,35 @@ export default function App() {
   const [scenarioPumpLoading, setScenarioPumpLoading] = useState(false)
   const prevSensitivityEnabledRef = useRef(false)
 
+  const scenarioOverridesForIpr = useMemo(() => {
+    const filtered: Record<string, ScenarioOverride> = {}
+
+    Object.entries(scenarioOverrides || {}).forEach(([key, override]) => {
+      if (!override) return
+
+      const entry: ScenarioOverride = {}
+
+      if (typeof override.qTest === 'number' && Number.isFinite(override.qTest)) {
+        entry.qTest = override.qTest
+      }
+
+      if (typeof override.pwfTest === 'number' && Number.isFinite(override.pwfTest)) {
+        entry.pwfTest = override.pwfTest
+      }
+
+      if (Object.keys(entry).length > 0) {
+        filtered[key] = entry
+      }
+    })
+
+    return filtered
+  }, [scenarioOverrides])
+
+  const scenarioOverridesForIprSignature = useMemo(
+    () => JSON.stringify(scenarioOverridesForIpr),
+    [scenarioOverridesForIpr]
+  )
+
   // Estados para Installation Design (FASE 1)
   const [profundidadIntake, setProfundidadIntake] = useState(2000)  // m
   const [tubingSelected, setTubingSelected] = useState('Tbg 2-7/8"')
@@ -393,6 +422,24 @@ export default function App() {
       return changed ? next : prev
     })
   }, [scenarioDefinitions])
+
+  const serializeOverrides = (overrides: Record<string, ScenarioOverride>) => {
+    const result: Record<string, any> = {}
+    Object.entries(overrides || {}).forEach(([key, override]) => {
+      if (!override) return
+      const entry: Record<string, number> = {}
+      if (typeof override.qTest === 'number' && Number.isFinite(override.qTest)) {
+        entry.q_test = override.qTest
+      }
+      if (typeof override.pwfTest === 'number' && Number.isFinite(override.pwfTest)) {
+        entry.pwf_test = override.pwfTest
+      }
+      if (Object.keys(entry).length > 0) {
+        result[key] = entry
+      }
+    })
+    return result
+  }
 
   const scenarioDisplayValues = useMemo(() => {
     const result: Record<string, ScenarioDisplayValues> = {}
@@ -1071,6 +1118,11 @@ export default function App() {
         q_max_estimate: 500
       }
 
+      const overridesPayload = serializeOverrides(scenarioOverridesForIpr)
+      if (Object.keys(overridesPayload).length > 0) {
+        wellData.sensitivity_overrides = overridesPayload
+      }
+
       const res = await axios.post('/api/calculate_conditions', wellData)
       const payload = res.data || {}
       
@@ -1088,46 +1140,73 @@ export default function App() {
       if (payload.success && payload.ipr_data) {
         setIprData(payload.ipr_data)
 
-        setScenarioOrder(DEFAULT_SCENARIO_ORDER)
-        setScenarioDefinitions({})
-        setIprScenarios({})
+        const nextScenarioOrder = Array.isArray(payload.scenario_order) && payload.scenario_order.length > 0
+          ? payload.scenario_order
+          : DEFAULT_SCENARIO_ORDER
 
-        if (payload.pressure_demand_curve) {
-          const baseCurve = payload.pressure_demand_curve
-          const cloneCurve = (source: any) => {
-            if (!source) return null
-            const result: any = { ...source }
-            if (Array.isArray(source.curve)) {
-              result.curve = source.curve.map((point: any) => ({ ...point }))
-            } else {
-              result.curve = []
-            }
-            if (source.components && typeof source.components === 'object') {
-              result.components = { ...source.components }
-            }
-            return result
+        const cloneCurve = (source: any) => {
+          if (!source) return null
+          const result: any = { ...source }
+          if (Array.isArray(source.curve)) {
+            result.curve = source.curve.map((point: any) => ({ ...point }))
+          } else {
+            result.curve = []
           }
-
-          const scenarioMap: Record<string, any> = {}
-          DEFAULT_SCENARIO_ORDER.forEach((key) => {
-            scenarioMap[key] = cloneCurve(baseCurve)
-          })
-
-          setPressureDemandCurve(baseCurve)
-          setPressureDemandScenarios(scenarioMap)
-          setScenarioOverrides({})
-          console.log('✅ pressureDemandCurve guardado en el estado (manual scenarios)')
-        } else {
-          setPressureDemandCurve(null)
-          setPressureDemandScenarios({})
-          setScenarioOverrides({})
-          console.log('⚠️ NO se recibió pressure_demand_curve del backend')
+          if (source.components && typeof source.components === 'object') {
+            result.components = { ...source.components }
+          }
+          return result
         }
 
-        setScenarioVisibility({
-          optimistic: false,
-          conservative: true,
-          pessimistic: false
+        const baseCurve = payload.pressure_demand_curve || null
+        const serverScenarioCurves = payload.pressure_demand_scenarios || {}
+
+        const allScenarioKeys = new Set<string>([...nextScenarioOrder, ...DEFAULT_SCENARIO_ORDER])
+        Object.keys(serverScenarioCurves || {}).forEach((key) => allScenarioKeys.add(key))
+        Object.keys(scenarioOverridesForIpr || {}).forEach((key) => allScenarioKeys.add(key))
+
+        const nextScenarioCurves: Record<string, any> = {}
+        allScenarioKeys.forEach((key) => {
+          if (!key) return
+          const hasOverride = Object.prototype.hasOwnProperty.call(scenarioOverridesForIpr, key)
+          const serverCurve = serverScenarioCurves?.[key]
+          const sourceCurve = hasOverride && serverCurve ? serverCurve : baseCurve
+          if (sourceCurve) {
+            nextScenarioCurves[key] = cloneCurve(sourceCurve)
+          }
+        })
+
+        setScenarioOrder(nextScenarioOrder)
+        setScenarioDefinitions(payload.scenario_definitions || {})
+        setIprScenarios(payload.ipr_scenarios || {})
+        setPressureDemandCurve(baseCurve)
+        setPressureDemandScenarios(nextScenarioCurves)
+
+        setScenarioVisibility((prev) => {
+          const nextVisibility: Record<string, boolean> = { ...prev }
+
+          allScenarioKeys.forEach((key) => {
+            if (nextVisibility[key] === undefined) {
+              nextVisibility[key] = key === 'conservative'
+            }
+          })
+
+          Object.keys(nextVisibility).forEach((key) => {
+            if (!allScenarioKeys.has(key)) {
+              delete nextVisibility[key]
+            }
+          })
+
+          if (!Object.values(nextVisibility).some(Boolean) && allScenarioKeys.size > 0) {
+            const fallbackKey = allScenarioKeys.has('conservative')
+              ? 'conservative'
+              : Array.from(allScenarioKeys)[0]
+            if (fallbackKey) {
+              nextVisibility[fallbackKey] = true
+            }
+          }
+
+          return nextVisibility
         })
       } else {
         setError('Error calculating IPR')
@@ -1171,7 +1250,8 @@ export default function App() {
     tubingIdMm,
     tubingRoughness,
     // IMPORTANTE: Recalcular cuando cambia el número de bombas
-    numPumpsDesign
+    numPumpsDesign,
+    scenarioOverridesForIprSignature
   ])
   
   // useEffect para actualizar curvas en modo comparador
