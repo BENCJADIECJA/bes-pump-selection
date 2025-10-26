@@ -94,6 +94,7 @@ export default function App() {
   const [stages, setStages] = useState(300)
   const [points, setPoints] = useState(300)
   const [curves, setCurves] = useState<any | null>(null)
+  const [combinedCurves, setCombinedCurves] = useState<any | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   
@@ -114,12 +115,11 @@ export default function App() {
     { id: null, stages: 300 }
   ])
   const prevSelectedRef = useRef<string | null>(null)
-  const [combinedCurves, setCombinedCurves] = useState<any>(null)
   const [individualCurves, setIndividualCurves] = useState<any[]>([])
   
   // Estado para controlar pestañas
   const [configTab, setConfigTab] = useState<'pump' | 'installation' | 'ipr'>('pump')
-  const [visualTab, setVisualTab] = useState<'curves' | 'ipr'>('curves')
+  const [visualTab, setVisualTab] = useState<'curves' | 'ipr' | 'demand'>('curves')
   const [pumpCurvesTab, setPumpCurvesTab] = useState<'combined' | 'efficiency' | 'head' | 'bhp'>('combined')
   
   // Estados para modo comparador
@@ -148,6 +148,7 @@ export default function App() {
 
   // Estados para IPR (Inflow Performance Relationship) - UNIDADES MÉTRICAS
   const [showIPR, setShowIPR] = useState(false)
+  const [showSensitivity, setShowSensitivity] = useState(false)
   const [iprMethod, setIprMethod] = useState('vogel')
   const [presionReservorio, setPresionReservorio] = useState(150)  // bar
   const [pi, setPi] = useState(5.0)  // m³/d/bar
@@ -180,6 +181,10 @@ export default function App() {
   })
   const [scenarioOverrides, setScenarioOverrides] = useState<Record<string, ScenarioOverride>>({})
   const [openScenarioKey, setOpenScenarioKey] = useState<string | null>(null)
+  const [scenarioPumpCurves, setScenarioPumpCurves] = useState<Record<string, any>>({})
+  const [scenarioMeta, setScenarioMeta] = useState<Record<string, { frequency?: number }>>({})
+  const [scenarioPumpLoading, setScenarioPumpLoading] = useState(false)
+  const prevSensitivityEnabledRef = useRef(false)
 
   // Estados para Installation Design (FASE 1)
   const [profundidadIntake, setProfundidadIntake] = useState(2000)  // m
@@ -231,22 +236,29 @@ export default function App() {
     return Array.from(keys)
   }, [scenarioOrder, pressureDemandScenarios, iprScenarios])
 
-  const activeScenarioKeys = availableScenarioKeys.filter((key) => scenarioVisibility[key])
-  const primaryScenarioKey = activeScenarioKeys[0]
-    || (availableScenarioKeys.includes('conservative') ? 'conservative' : availableScenarioKeys[0])
-    || null
+  const sensitivityEnabled = showIPR && showSensitivity
 
-  const primaryDemandCurve = (primaryScenarioKey && pressureDemandScenarios?.[primaryScenarioKey])
-    || pressureDemandCurve
+  const activeScenarioKeys = availableScenarioKeys.filter((key) => scenarioVisibility[key])
+
+  const primaryScenarioKey = sensitivityEnabled
+    ? activeScenarioKeys[0]
+      || (availableScenarioKeys.includes('conservative') ? 'conservative' : availableScenarioKeys[0])
+      || null
+    : null
+
+  const primaryDemandCurve = sensitivityEnabled && primaryScenarioKey
+    ? (pressureDemandScenarios?.[primaryScenarioKey] || pressureDemandCurve)
+    : pressureDemandCurve
 
   const scenarioPlotProps = {
     pressureDemandCurve: primaryDemandCurve,
-    pressureDemandScenarios,
-    iprScenarios,
-    scenarioVisibility,
+    basePressureDemandCurve: pressureDemandCurve,
+    pressureDemandScenarios: sensitivityEnabled ? pressureDemandScenarios : {},
+    iprScenarios: sensitivityEnabled ? iprScenarios : {},
+    scenarioVisibility: sensitivityEnabled ? scenarioVisibility : {},
     scenarioStyles,
-    scenarioOrder: availableScenarioKeys,
-    activeScenarioKey: primaryScenarioKey
+    scenarioOrder: sensitivityEnabled ? availableScenarioKeys : [],
+    activeScenarioKey: sensitivityEnabled ? primaryScenarioKey : null
   }
 
   const handleScenarioToggle = (scenarioKey: string) => {
@@ -257,7 +269,7 @@ export default function App() {
   }
 
   const handleScenarioConfigure = (scenarioKey: string) => {
-    if (!scenarioKey) return
+    if (!scenarioKey || !sensitivityEnabled) return
     setOpenScenarioKey(scenarioKey)
   }
 
@@ -293,26 +305,60 @@ export default function App() {
     setOpenScenarioKey(null)
   }
 
-  const serializeOverrides = (overrides: Record<string, ScenarioOverride>) => {
-    const result: Record<string, any> = {}
-    Object.entries(overrides || {}).forEach(([key, override]) => {
-      if (!override) return
-      const entry: Record<string, number> = {}
-      if (typeof override.qTest === 'number' && Number.isFinite(override.qTest)) {
-        entry.q_test = override.qTest
-      }
-      if (typeof override.pwfTest === 'number' && Number.isFinite(override.pwfTest)) {
-        entry.pwf_test = override.pwfTest
-      }
-      if (typeof override.freq === 'number' && Number.isFinite(override.freq)) {
-        entry.frequency_hz = override.freq
-      }
-      if (Object.keys(entry).length > 0) {
-        result[key] = entry
-      }
+  useEffect(() => {
+    if (!sensitivityEnabled) {
+      setOpenScenarioKey(null)
+    }
+  }, [sensitivityEnabled])
+
+  useEffect(() => {
+    if (!pressureDemandCurve || !Array.isArray(pressureDemandCurve.curve)) {
+      return
+    }
+
+    const sample = pressureDemandCurve.curve.slice(0, 2)
+    console.log('[debug] base demand updated', {
+      count: pressureDemandCurve.curve.length,
+      sample
     })
-    return result
-  }
+  }, [pressureDemandCurve])
+
+  useEffect(() => {
+    if (!pressureDemandScenarios || typeof pressureDemandScenarios !== 'object') {
+      console.log('[debug] scenario demand updated', {})
+      return
+    }
+
+    const summary = Object.fromEntries(
+      Object.entries(pressureDemandScenarios).map(([key, data]) => [
+        key,
+        {
+          count: Array.isArray(data?.curve) ? data.curve.length : 0,
+          sample: Array.isArray(data?.curve) ? data.curve.slice(0, 2) : []
+        }
+      ])
+    )
+
+    console.log('[debug] scenario demand updated', summary)
+  }, [pressureDemandScenarios])
+
+  useEffect(() => {
+    if (sensitivityEnabled && !prevSensitivityEnabledRef.current) {
+      setScenarioVisibility((prev) => {
+        const next = { ...prev }
+        let changed = false
+        availableScenarioKeys.forEach((key) => {
+          if (!next[key]) {
+            next[key] = true
+            changed = true
+          }
+        })
+        return changed ? next : prev
+      })
+    }
+
+    prevSensitivityEnabledRef.current = sensitivityEnabled
+  }, [sensitivityEnabled, availableScenarioKeys])
 
   useEffect(() => {
     setScenarioOverrides((prev) => {
@@ -439,6 +485,272 @@ export default function App() {
     freq,
     qTest,
     pwfTest
+  ])
+
+  useEffect(() => {
+    if (!sensitivityEnabled || !showIPR || !selected || numPumpsDesign !== 1) {
+      setScenarioPumpCurves({})
+      setScenarioMeta({})
+      setScenarioPumpLoading(false)
+      return
+    }
+
+    if (!availableScenarioKeys.length) {
+      setScenarioPumpCurves({})
+      setScenarioMeta({})
+      setScenarioPumpLoading(false)
+      return
+    }
+
+    let cancelled = false
+    const controller = new AbortController()
+    setScenarioPumpLoading(true)
+
+    const loadScenarioCurves = async () => {
+      try {
+        const requests = await Promise.all(
+          availableScenarioKeys.map(async (scenarioKey) => {
+            const display = scenarioDisplayValues?.[scenarioKey]
+            const targetFrequency = typeof display?.freq === 'number' ? display.freq : freq
+
+            if (!Number.isFinite(targetFrequency)) {
+              return { scenarioKey, curves: null, frequency: display?.freq }
+            }
+
+            if (
+              curves &&
+              Number.isFinite(freq) &&
+              Math.abs(targetFrequency - freq) < 1e-6
+            ) {
+              return { scenarioKey, curves, frequency: targetFrequency }
+            }
+
+            const url = `/api/pumps/${encodeURIComponent(selected)}/curves?freq=${targetFrequency}&stages=${stages}&points=${points}`
+            const response = await axios.get(url, { signal: controller.signal })
+            const payload = response.data || {}
+            const curvePayload = payload.curves || payload
+            return { scenarioKey, curves: curvePayload, frequency: targetFrequency }
+          })
+        )
+
+        if (cancelled) {
+          return
+        }
+
+        const pumpMap: Record<string, any> = {}
+        const metaMap: Record<string, { frequency?: number }> = {}
+
+        requests.forEach((entry) => {
+          if (!entry) return
+          metaMap[entry.scenarioKey] = { frequency: entry.frequency }
+          if (entry.curves) {
+            pumpMap[entry.scenarioKey] = entry.curves
+          }
+        })
+
+        setScenarioPumpCurves(pumpMap)
+        setScenarioMeta(metaMap)
+      } catch (error: any) {
+        if (!axios.isCancel(error)) {
+          console.error('Error loading scenario pump curves:', error)
+        }
+      } finally {
+        if (!cancelled) {
+          setScenarioPumpLoading(false)
+        }
+      }
+    }
+
+    loadScenarioCurves()
+
+    return () => {
+      cancelled = true
+      controller.abort()
+      setScenarioPumpLoading(false)
+    }
+  }, [
+    sensitivityEnabled,
+    showIPR,
+    selected,
+    numPumpsDesign,
+    availableScenarioKeys,
+    scenarioDisplayValues,
+    freq,
+    curves,
+    stages,
+    points
+  ])
+
+  const scenarioOperatingSummary = useMemo(() => {
+    if (!sensitivityEnabled) {
+      return [] as any[]
+    }
+
+    const summaries: any[] = []
+
+    availableScenarioKeys.forEach((scenarioKey) => {
+      const pumpCurve = scenarioPumpCurves?.[scenarioKey]
+      const demandSource = pressureDemandScenarios?.[scenarioKey] || pressureDemandCurve
+
+      if (!pumpCurve || !Array.isArray(pumpCurve.head) || pumpCurve.head.length < 2) {
+        return
+      }
+
+      if (!demandSource || !Array.isArray(demandSource.curve) || demandSource.curve.length < 2) {
+        return
+      }
+
+      const pumpQ = pumpCurve.head
+        .map((point: any) => Number(point.caudal))
+        .filter((value: number) => Number.isFinite(value))
+      const pumpHead = pumpCurve.head
+        .map((point: any) => Number(point.valor))
+        .filter((value: number) => Number.isFinite(value))
+
+      if (pumpQ.length < 2 || pumpHead.length < 2) {
+        return
+      }
+
+      const demandQ = demandSource.curve
+        .map((point: any) => Number(point.caudal))
+        .filter((value: number) => Number.isFinite(value))
+      const demandHead = demandSource.curve
+        .map((point: any) => Number(point.tdh))
+        .filter((value: number) => Number.isFinite(value))
+
+      if (demandQ.length < 2 || demandHead.length < 2) {
+        return
+      }
+
+      const intersection = findPumpDemandIntersection(pumpQ, pumpHead, demandQ, demandHead)
+
+      const displayValues = scenarioDisplayValues?.[scenarioKey]
+      const targetFlowOverride = displayValues?.qTest
+      const targetPwfOverride = displayValues?.pwfTest
+
+      const targetFlow = Number.isFinite(targetFlowOverride)
+        ? Number(targetFlowOverride)
+        : (intersection && Number.isFinite(intersection.q) ? Number(intersection.q) : null)
+
+      if (!Number.isFinite(targetFlow)) {
+        return
+      }
+
+      const mapSeries = (series: any[], multiplier = 1) => {
+        if (!Array.isArray(series)) {
+          return null
+        }
+        const filtered = series
+          .map((point: any) => ({ q: Number(point.caudal), value: Number(point.valor) * multiplier }))
+          .filter((entry) => Number.isFinite(entry.q) && Number.isFinite(entry.value))
+        return filtered.length > 1 ? filtered : null
+      }
+
+      const efficiencySeries = mapSeries(pumpCurve.efficiency, 100)
+      const bhpSeries = mapSeries(pumpCurve.bhp)
+
+      const interpolateFromSeries = (series: any[] | null, flow: number) =>
+        series
+          ? interpolateValue(
+              series.map((entry) => entry.q),
+              series.map((entry) => entry.value),
+              flow
+            )
+          : null
+
+      const pumpHeadAtFlow = interpolateValue(pumpQ, pumpHead, targetFlow)
+      const efficiency = interpolateFromSeries(efficiencySeries, targetFlow)
+      const bhp = interpolateFromSeries(bhpSeries, targetFlow)
+
+      const extractDemandSeries = (key: string) => {
+        const filtered = demandSource.curve
+          .map((point: any) => ({ q: Number(point.caudal), value: Number(point[key]) }))
+          .filter((entry) => Number.isFinite(entry.q) && Number.isFinite(entry.value))
+        return filtered.length > 1 ? filtered : null
+      }
+
+      const pipSeries = extractDemandSeries('pip')
+      const pwfSeries = extractDemandSeries('pwf')
+      const nivelSeries = extractDemandSeries('nivel')
+      const frictionSeries = extractDemandSeries('perdidas_friccion')
+
+      const demandHeadAtFlow = interpolateValue(demandQ, demandHead, targetFlow)
+      const pip = interpolateFromSeries(pipSeries, targetFlow)
+      const pwfFromDemand = interpolateFromSeries(pwfSeries, targetFlow)
+      const nivel = interpolateFromSeries(nivelSeries, targetFlow)
+      const friction = interpolateFromSeries(frictionSeries, targetFlow)
+
+      const pwfValue = Number.isFinite(targetPwfOverride)
+        ? Number(targetPwfOverride)
+        : (Number.isFinite(pwfFromDemand) ? Number(pwfFromDemand) : null)
+
+      const components = demandSource.components || {}
+      const gradient = typeof components.gradiente === 'number'
+        ? components.gradiente
+        : (typeof pressureDemandCurve?.components?.gradiente === 'number'
+          ? pressureDemandCurve.components.gradiente
+          : null)
+
+      const pumpDepth = typeof components.profundidad_bomba === 'number'
+        ? components.profundidad_bomba
+        : (typeof pressureDemandCurve?.components?.profundidad_bomba === 'number'
+          ? pressureDemandCurve.components.profundidad_bomba
+          : null)
+
+      let submergence: number | null = null
+      if (typeof gradient === 'number' && gradient > 0 && typeof pwfValue === 'number') {
+        const rawSub = pwfValue / gradient
+        if (Number.isFinite(rawSub)) {
+          submergence = Math.max(rawSub, 0)
+        }
+      }
+
+      let fluidLevel: number | null = null
+      if (typeof pumpDepth === 'number' && typeof submergence === 'number') {
+        const rawLevel = pumpDepth - submergence
+        if (Number.isFinite(rawLevel)) {
+          fluidLevel = Math.min(Math.max(rawLevel, 0), pumpDepth)
+        }
+      }
+
+      const frequency = scenarioMeta?.[scenarioKey]?.frequency
+        ?? displayValues?.freq
+        ?? freq
+
+      const headValue = Number.isFinite(pumpHeadAtFlow)
+        ? Number(pumpHeadAtFlow)
+        : (Number.isFinite(demandHeadAtFlow) ? Number(demandHeadAtFlow) : (intersection?.head ?? null))
+
+      const pwfDisplay = typeof pwfValue === 'number' && Number.isFinite(pwfValue)
+        ? pwfValue
+        : (typeof pwfFromDemand === 'number' ? pwfFromDemand : null)
+
+      summaries.push({
+        scenarioKey,
+        flow: Number(targetFlow),
+        head: headValue,
+        efficiency,
+        bhp,
+        pip,
+        pwf: pwfDisplay,
+        nivel,
+        friction,
+        submergence,
+        fluidLevel,
+        frequency
+      })
+    })
+
+    return summaries
+  }, [
+    sensitivityEnabled,
+    availableScenarioKeys,
+    scenarioPumpCurves,
+    pressureDemandScenarios,
+    pressureDemandCurve,
+    scenarioMeta,
+    scenarioDisplayValues,
+    freq
   ])
 
   const handleNumPumpsDesignChange = (newCount: number) => {
@@ -759,11 +1071,6 @@ export default function App() {
         q_max_estimate: 500
       }
 
-      const overridesPayload = serializeOverrides(scenarioOverrides)
-      if (Object.keys(overridesPayload).length > 0) {
-        wellData.sensitivity_overrides = overridesPayload
-      }
-      
       const res = await axios.post('/api/calculate_conditions', wellData)
       const payload = res.data || {}
       
@@ -781,70 +1088,47 @@ export default function App() {
       if (payload.success && payload.ipr_data) {
         setIprData(payload.ipr_data)
 
-        if (Array.isArray(payload.scenario_order) && payload.scenario_order.length > 0) {
-          setScenarioOrder(payload.scenario_order)
-        } else {
-          setScenarioOrder(DEFAULT_SCENARIO_ORDER)
-        }
-
-        if (payload.scenario_definitions) {
-          setScenarioDefinitions(payload.scenario_definitions)
-        } else {
-          setScenarioDefinitions({})
-        }
-
-        if (payload.ipr_scenarios) {
-          setIprScenarios(payload.ipr_scenarios)
-        } else {
-          setIprScenarios({})
-        }
-
-        if (payload.pressure_demand_scenarios) {
-          setPressureDemandScenarios(payload.pressure_demand_scenarios)
-        } else {
-          setPressureDemandScenarios({})
-        }
+        setScenarioOrder(DEFAULT_SCENARIO_ORDER)
+        setScenarioDefinitions({})
+        setIprScenarios({})
 
         if (payload.pressure_demand_curve) {
-          setPressureDemandCurve(payload.pressure_demand_curve)
-          console.log('✅ pressureDemandCurve guardado en el estado')
+          const baseCurve = payload.pressure_demand_curve
+          const cloneCurve = (source: any) => {
+            if (!source) return null
+            const result: any = { ...source }
+            if (Array.isArray(source.curve)) {
+              result.curve = source.curve.map((point: any) => ({ ...point }))
+            } else {
+              result.curve = []
+            }
+            if (source.components && typeof source.components === 'object') {
+              result.components = { ...source.components }
+            }
+            return result
+          }
+
+          const scenarioMap: Record<string, any> = {}
+          DEFAULT_SCENARIO_ORDER.forEach((key) => {
+            scenarioMap[key] = cloneCurve(baseCurve)
+          })
+
+          setPressureDemandCurve(baseCurve)
+          setPressureDemandScenarios(scenarioMap)
+          setScenarioOverrides({})
+          console.log('✅ pressureDemandCurve guardado en el estado (manual scenarios)')
         } else {
           setPressureDemandCurve(null)
+          setPressureDemandScenarios({})
+          setScenarioOverrides({})
           console.log('⚠️ NO se recibió pressure_demand_curve del backend')
         }
 
-        const scenarioKeys = payload.pressure_demand_scenarios
-          ? Object.keys(payload.pressure_demand_scenarios)
-          : (payload.ipr_scenarios ? Object.keys(payload.ipr_scenarios) : [])
-
-        if (scenarioKeys.length > 0) {
-          setScenarioVisibility((prev) => {
-            const updated = { ...prev }
-            scenarioKeys.forEach((key) => {
-              if (updated[key] === undefined) {
-                updated[key] = key === 'conservative'
-              }
-            })
-            Object.keys(updated).forEach((key) => {
-              if (!scenarioKeys.includes(key)) {
-                delete updated[key]
-              }
-            })
-            if (!scenarioKeys.some((key) => updated[key])) {
-              const fallbackKey = scenarioKeys.includes('conservative') ? 'conservative' : scenarioKeys[0]
-              if (fallbackKey) {
-                updated[fallbackKey] = true
-              }
-            }
-            return updated
-          })
-        } else {
-          setScenarioVisibility({
-            optimistic: false,
-            conservative: true,
-            pessimistic: false
-          })
-        }
+        setScenarioVisibility({
+          optimistic: false,
+          conservative: true,
+          pessimistic: false
+        })
       } else {
         setError('Error calculating IPR')
       }
@@ -887,8 +1171,7 @@ export default function App() {
     tubingIdMm,
     tubingRoughness,
     // IMPORTANTE: Recalcular cuando cambia el número de bombas
-    numPumpsDesign,
-    scenarioOverrides
+    numPumpsDesign
   ])
   
   // useEffect para actualizar curvas en modo comparador
@@ -937,7 +1220,13 @@ export default function App() {
   }, [numPumpsDesign, designPumps, freq, points, isComparisonMode])
 
   useEffect(() => {
-    if (!showIPR && visualTab === 'ipr') {
+    if (!showIPR) {
+      setShowSensitivity(false)
+    }
+  }, [showIPR])
+
+  useEffect(() => {
+    if (!showIPR && visualTab !== 'curves') {
       setVisualTab('curves')
     }
   }, [showIPR, visualTab])
@@ -1344,7 +1633,7 @@ export default function App() {
         onToggleScenario={handleScenarioToggle}
         scenarioStyles={scenarioStyles}
         scenarioOrder={availableScenarioKeys}
-        showScenarioOverlay={true}
+        showScenarioOverlay={sensitivityEnabled}
         onScenarioConfigure={handleScenarioConfigure}
         scenarioOverrides={scenarioDisplayValues}
       />
@@ -1374,6 +1663,108 @@ export default function App() {
       )
     }
 
+    const summariesByKey = scenarioOperatingSummary.reduce<Record<string, any>>((acc, entry) => {
+      acc[entry.scenarioKey] = entry
+      return acc
+    }, {})
+
+    const displayScenarioKeys = availableScenarioKeys.filter((key) => summariesByKey[key])
+
+    const scenarioOperatingPoints = scenarioOperatingSummary.map((entry) => ({
+      scenarioKey: entry.scenarioKey,
+      flow: entry.flow,
+      head: entry.head,
+      pwf: entry.pwf,
+      frequency: entry.frequency
+    }))
+
+    const renderScenarioOperatingTable = () => {
+      if (!sensitivityEnabled || displayScenarioKeys.length === 0) {
+        return null
+      }
+
+      const activeScenarioKeysForTable = displayScenarioKeys.filter((scenarioKey) => {
+        if (scenarioVisibility && Object.prototype.hasOwnProperty.call(scenarioVisibility, scenarioKey)) {
+          return Boolean(scenarioVisibility[scenarioKey])
+        }
+        return true
+      })
+
+      if (activeScenarioKeysForTable.length === 0) {
+        return null
+      }
+
+      const formatNumber = (value: any, digits = 1, suffix = '') => {
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+          return '—'
+        }
+        return `${value.toFixed(digits)}${suffix ? ` ${suffix}` : ''}`
+      }
+
+      const metrics = [
+        { key: 'flow', label: 'Flow (m³/d)', format: (value: any) => formatNumber(value, 1) },
+        { key: 'head', label: 'TDH (m)', format: (value: any) => formatNumber(value, 1) },
+        { key: 'pwf', label: 'Pwf (bar)', format: (value: any) => formatNumber(value, 2) },
+        { key: 'pip', label: 'PIP (bar)', format: (value: any) => formatNumber(value, 2) },
+        { key: 'frequency', label: 'Frequency (Hz)', format: (value: any) => formatNumber(value, 1) },
+        {
+          key: 'efficiency',
+          label: 'Efficiency (%)',
+          format: (value: any) => {
+            const formatted = formatNumber(value, 1)
+            return formatted === '—' ? formatted : `${formatted} %`
+          }
+        },
+        { key: 'bhp', label: 'BHP (HP)', format: (value: any) => formatNumber(value, 1) },
+        { key: 'fluidLevel', label: 'Fluid Level (m)', format: (value: any) => formatNumber(value, 1) },
+        { key: 'submergence', label: 'Submergence (m)', format: (value: any) => formatNumber(value, 1) },
+        { key: 'friction', label: 'Friction Loss (m)', format: (value: any) => formatNumber(value, 1) }
+      ]
+
+      return (
+        <div className="panel-card sensitivity-table-card">
+          <h3 className="panel-heading">System Operating Points</h3>
+          <div className="table-wrapper">
+            <table className="sensitivity-table sensitivity-table--scenario-grid">
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  {activeScenarioKeysForTable.map((scenarioKey) => (
+                    <th
+                      key={`header-${scenarioKey}`}
+                      style={{ color: scenarioStyles?.[scenarioKey]?.color || '#9fb7ff' }}
+                    >
+                      {scenarioStyles?.[scenarioKey]?.label || scenarioKey}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {metrics.map((metric) => (
+                  <tr key={metric.key}>
+                    <td className="metric-label">{metric.label}</td>
+                    {activeScenarioKeysForTable.map((scenarioKey) => {
+                      const summary = summariesByKey[scenarioKey]
+                      const value = summary ? summary[metric.key as keyof typeof summary] : null
+                      return (
+                        <td
+                          key={`${metric.key}-${scenarioKey}`}
+                          className="scenario-value"
+                          style={{ color: scenarioStyles?.[scenarioKey]?.color || '#dbe4ff' }}
+                        >
+                          {metric.format(value)}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )
+    }
+
     if (numPumpsDesign === 1) {
       if (!selected) {
         return <div className="empty-state">Select a pump to view the performance curves.</div>
@@ -1392,7 +1783,44 @@ export default function App() {
         )
       }
 
-      if (!isMultiFreq && curves) {
+      if (sensitivityEnabled) {
+        if (!pressureDemandCurve && !Object.keys(pressureDemandScenarios || {}).length) {
+          return <div className="empty-state">Run the IPR calculation to generate the scenario overlays.</div>
+        }
+
+        if (scenarioPumpLoading) {
+          return <div className="empty-state">Calculating sensitivity curves…</div>
+        }
+
+        if (Object.keys(scenarioPumpCurves || {}).length > 0) {
+          return (
+            <>
+              <div className="panel-card panel-card--no-padding">
+                <CurvePlot
+                  {...scenarioPlotProps}
+                  curves={null}
+                  iprData={null}
+                  showIPR={false}
+                  sensitivityPumpData={{
+                    pumpCurves: scenarioPumpCurves,
+                    demandCurves: pressureDemandScenarios,
+                    fallbackDemandCurve: pressureDemandCurve,
+                    scenarioMeta,
+                    operatingPoints: scenarioOperatingPoints,
+                    scenarioOrder: availableScenarioKeys,
+                    scenarioStyles
+                  }}
+                />
+              </div>
+              {renderScenarioOperatingTable()}
+            </>
+          )
+        }
+
+        return <div className="empty-state">No sensitivity data available for the current configuration.</div>
+      }
+
+      if (curves) {
         return (
           <CurvePlot
             {...scenarioPlotProps}
@@ -1413,78 +1841,81 @@ export default function App() {
     const hasIndividual = individualCurves.length > 1
 
     return (
-      <div className="panel-card panel-card--no-padding">
-        {hasIndividual && (
-          <div className="subtabs-header">
-            <button
-              className={`subtab-button ${pumpCurvesTab === 'combined' ? 'active' : ''}`}
-              onClick={() => setPumpCurvesTab('combined')}
-            >
-              Combined System
-            </button>
-            <button
-              className={`subtab-button ${pumpCurvesTab === 'efficiency' ? 'active' : ''}`}
-              onClick={() => setPumpCurvesTab('efficiency')}
-            >
-              Efficiency
-            </button>
-            <button
-              className={`subtab-button ${pumpCurvesTab === 'head' ? 'active' : ''}`}
-              onClick={() => setPumpCurvesTab('head')}
-            >
-              Head (TDH)
-            </button>
-            <button
-              className={`subtab-button ${pumpCurvesTab === 'bhp' ? 'active' : ''}`}
-              onClick={() => setPumpCurvesTab('bhp')}
-            >
-              Power (BHP)
-            </button>
+      <>
+        <div className="panel-card panel-card--no-padding">
+          {hasIndividual && (
+            <div className="subtabs-header">
+              <button
+                className={`subtab-button ${pumpCurvesTab === 'combined' ? 'active' : ''}`}
+                onClick={() => setPumpCurvesTab('combined')}
+              >
+                Combined System
+              </button>
+              <button
+                className={`subtab-button ${pumpCurvesTab === 'efficiency' ? 'active' : ''}`}
+                onClick={() => setPumpCurvesTab('efficiency')}
+              >
+                Efficiency
+              </button>
+              <button
+                className={`subtab-button ${pumpCurvesTab === 'head' ? 'active' : ''}`}
+                onClick={() => setPumpCurvesTab('head')}
+              >
+                Head (TDH)
+              </button>
+              <button
+                className={`subtab-button ${pumpCurvesTab === 'bhp' ? 'active' : ''}`}
+                onClick={() => setPumpCurvesTab('bhp')}
+              >
+                Power (BHP)
+              </button>
+            </div>
+          )}
+          <div className="subtab-content">
+            {(!hasIndividual || pumpCurvesTab === 'combined') && (
+              <CurvePlot
+                {...scenarioPlotProps}
+                curves={combinedCurves}
+                iprData={null}
+                showIPR={false}
+              />
+            )}
+            {hasIndividual && pumpCurvesTab === 'efficiency' && (
+              <CurvePlot
+                {...scenarioPlotProps}
+                curves={null}
+                isIndividualEfficiency={true}
+                individualEfficiencyData={individualCurves}
+              />
+            )}
+            {hasIndividual && pumpCurvesTab === 'head' && (
+              <CurvePlot
+                {...scenarioPlotProps}
+                curves={null}
+                isIndividualHead={true}
+                individualHeadData={individualCurves}
+                iprData={null}
+                showIPR={false}
+              />
+            )}
+            {hasIndividual && pumpCurvesTab === 'bhp' && (
+              <CurvePlot
+                {...scenarioPlotProps}
+                curves={null}
+                isIndividualBhp={true}
+                individualBhpData={individualCurves}
+              />
+            )}
           </div>
-        )}
-        <div className="subtab-content">
-          {(!hasIndividual || pumpCurvesTab === 'combined') && (
-            <CurvePlot
-              {...scenarioPlotProps}
-              curves={combinedCurves}
-              iprData={null}
-              showIPR={false}
-            />
-          )}
-          {hasIndividual && pumpCurvesTab === 'efficiency' && (
-            <CurvePlot
-              {...scenarioPlotProps}
-              curves={null}
-              isIndividualEfficiency={true}
-              individualEfficiencyData={individualCurves}
-            />
-          )}
-          {hasIndividual && pumpCurvesTab === 'head' && (
-            <CurvePlot
-              {...scenarioPlotProps}
-              curves={null}
-              isIndividualHead={true}
-              individualHeadData={individualCurves}
-              iprData={null}
-              showIPR={false}
-            />
-          )}
-          {hasIndividual && pumpCurvesTab === 'bhp' && (
-            <CurvePlot
-              {...scenarioPlotProps}
-              curves={null}
-              isIndividualBhp={true}
-              individualBhpData={individualCurves}
-            />
-          )}
         </div>
-      </div>
+        {renderScenarioOperatingTable()}
+      </>
     )
   }
 
-  const renderIprDemandContent = (): React.ReactNode => {
+  const renderIprContent = (): React.ReactNode => {
     if (!showIPR) {
-      return <div className="empty-state">Enable “Show IPR” to display the well inflow and system demand curves.</div>
+      return <div className="empty-state">Enable “Show IPR” to display the well inflow curve.</div>
     }
 
     if (loading) {
@@ -1503,6 +1934,35 @@ export default function App() {
         iprData={iprData}
         showIPR={true}
         pumpCurves={numPumpsDesign > 1 ? combinedCurves : curves}
+        hideDemandWithinIPR={true}
+      />
+    )
+  }
+
+  const renderDemandContent = (): React.ReactNode => {
+    if (!showIPR) {
+      return <div className="empty-state">Enable “Show IPR” to display the system demand curve.</div>
+    }
+
+    if (loading) {
+      return <div className="empty-state">Loading demand curves…</div>
+    }
+
+    const hasDemandData =
+      (pressureDemandCurve && Array.isArray(pressureDemandCurve.curve) && pressureDemandCurve.curve.length > 0) ||
+      Object.values(pressureDemandScenarios || {}).some(
+        (scenario: any) => Array.isArray(scenario?.curve) && scenario.curve.length > 0
+      )
+
+    if (!hasDemandData) {
+      return <div className="empty-state">Run the IPR calculation to generate the system demand curve.</div>
+    }
+
+    return (
+      <CurvePlot
+        {...scenarioPlotProps}
+        curves={null}
+        isDemandMode={true}
       />
     )
   }
@@ -1532,6 +1992,19 @@ export default function App() {
                 onChange={(event) => setShowIPR(event.target.checked)}
               />
               <span>📈 Show IPR</span>
+            </label>
+            <label
+              className={`checkbox-label toggle-chip ${showSensitivity ? 'toggle-chip--active' : ''}`}
+              title={!showIPR ? 'Enable “Show IPR” to access sensitivity overlays' : undefined}
+              style={!showIPR ? { opacity: 0.6, cursor: 'not-allowed' } : undefined}
+            >
+              <input
+                type="checkbox"
+                checked={showSensitivity}
+                onChange={(event) => setShowSensitivity(event.target.checked)}
+                disabled={!showIPR}
+              />
+              <span>🎯 Sensitivity</span>
             </label>
           </div>
           <div className="config-tabs">
@@ -1581,7 +2054,16 @@ export default function App() {
                 title={!showIPR ? 'Enable “Show IPR” to access this view' : undefined}
               >
                 <span className="tab-icon">🛢️</span>
-                <span>IPR &amp; Demand</span>
+                <span>IPR</span>
+              </button>
+              <button
+                className={`tab-button ${visualTab === 'demand' ? 'active' : ''}`}
+                onClick={() => setVisualTab('demand')}
+                disabled={!showIPR}
+                title={!showIPR ? 'Enable “Show IPR” to access this view' : undefined}
+              >
+                <span className="tab-icon">📐</span>
+                <span>Demand Curve</span>
               </button>
             </div>
             <div className="tab-content visual-tab-content">
@@ -1589,14 +2071,17 @@ export default function App() {
                 {renderPumpCurvesContent()}
               </div>
               <div className={`tab-panel ${visualTab === 'ipr' ? 'active' : ''}`}>
-                {renderIprDemandContent()}
+                {renderIprContent()}
+              </div>
+              <div className={`tab-panel ${visualTab === 'demand' ? 'active' : ''}`}>
+                {renderDemandContent()}
               </div>
             </div>
           </div>
         </section>
       </div>
       <ScenarioSensitivityModal
-        open={openScenarioKey !== null}
+        open={sensitivityEnabled && openScenarioKey !== null}
         scenarioKey={openScenarioKey}
         scenarioLabel={openScenarioKey ? scenarioStyles?.[openScenarioKey]?.label : undefined}
         values={openScenarioKey ? scenarioDisplayValues?.[openScenarioKey] : null}
