@@ -1,11 +1,12 @@
 // @ts-nocheck
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import PumpSelector from './components/PumpSelector'
 import CurveControls from './components/CurveControls'
 import CurvePlot from './components/CurvePlot'
 import IPRControls from './components/IPRControls'
 import InstallationControls from './components/InstallationControls'
+import ScenarioSensitivityModal from './components/ScenarioSensitivityModal'
 
 const DEFAULT_SCENARIO_ORDER = ['optimistic', 'conservative', 'pessimistic']
 const DEFAULT_SCENARIO_STYLES = {
@@ -14,6 +15,75 @@ const DEFAULT_SCENARIO_STYLES = {
   pessimistic: { label: 'Pessimistic', color: '#e74c3c', dash: 'dot', symbol: 'triangle-up' }
 }
 const FALLBACK_SCENARIO_STYLE = { label: 'System Demand', color: '#c0392b', dash: 'dot', symbol: 'star' }
+
+type ScenarioOverride = {
+  freq?: number
+  qTest?: number
+  pwfTest?: number
+}
+
+type ScenarioDisplayValues = {
+  freq: number
+  qTest: number
+  pwfTest: number
+}
+
+const interpolateValue = (qArray: number[], valueArray: number[], targetQ: number) => {
+  if (!qArray || !valueArray || qArray.length === 0 || valueArray.length === 0) return null
+  if (targetQ <= qArray[0]) return valueArray[0]
+  if (targetQ >= qArray[qArray.length - 1]) return valueArray[valueArray.length - 1]
+
+  for (let i = 0; i < qArray.length - 1; i++) {
+    const q1 = qArray[i]
+    const q2 = qArray[i + 1]
+    if (targetQ >= q1 && targetQ <= q2 && q2 !== q1) {
+      const v1 = valueArray[i]
+      const v2 = valueArray[i + 1]
+      const fraction = (targetQ - q1) / (q2 - q1)
+      return v1 + fraction * (v2 - v1)
+    }
+  }
+
+  return null
+}
+
+const findPumpDemandIntersection = (pumpQ: number[], pumpHead: number[], demandQ: number[], demandHead: number[]) => {
+  if (!pumpQ || !pumpHead || !demandQ || !demandHead) return null
+
+  for (let i = 0; i < pumpQ.length - 1; i++) {
+    const q1 = pumpQ[i]
+    const q2 = pumpQ[i + 1]
+    if (q2 === q1) continue
+
+    const pumpHead1 = pumpHead[i]
+    const pumpHead2 = pumpHead[i + 1]
+    const demandHead1 = interpolateValue(demandQ, demandHead, q1)
+    const demandHead2 = interpolateValue(demandQ, demandHead, q2)
+
+    if (demandHead1 === null || demandHead2 === null) continue
+
+    const diff1 = pumpHead1 - demandHead1
+    const diff2 = pumpHead2 - demandHead2
+
+    if (diff1 === 0) {
+      return { q: q1, head: pumpHead1 }
+    }
+
+    if (diff1 * diff2 < 0) {
+      const fraction = diff1 / (diff1 - diff2)
+      const intersectionQ = q1 + fraction * (q2 - q1)
+      const pumpHeadAtQ = interpolateValue(pumpQ, pumpHead, intersectionQ)
+      const demandHeadAtQ = interpolateValue(demandQ, demandHead, intersectionQ)
+      const headValue = pumpHeadAtQ !== null ? pumpHeadAtQ : demandHeadAtQ
+      return {
+        q: intersectionQ,
+        head: headValue !== null ? headValue : pumpHead1
+      }
+    }
+  }
+
+  return null
+}
 
 type DesignPump = { id: string | null; stages: number }
 
@@ -108,6 +178,8 @@ export default function App() {
     conservative: true,
     pessimistic: false
   })
+  const [scenarioOverrides, setScenarioOverrides] = useState<Record<string, ScenarioOverride>>({})
+  const [openScenarioKey, setOpenScenarioKey] = useState<string | null>(null)
 
   // Estados para Installation Design (FASE 1)
   const [profundidadIntake, setProfundidadIntake] = useState(2000)  // m
@@ -183,6 +255,191 @@ export default function App() {
       [scenarioKey]: !prev?.[scenarioKey]
     }))
   }
+
+  const handleScenarioConfigure = (scenarioKey: string) => {
+    if (!scenarioKey) return
+    setOpenScenarioKey(scenarioKey)
+  }
+
+  const handleScenarioOverrideSave = (scenarioKey: string, values: ScenarioDisplayValues) => {
+    setScenarioOverrides((prev) => {
+      const next: Record<string, ScenarioOverride> = { ...prev }
+
+      if (!values || !scenarioKey) {
+        delete next[scenarioKey]
+        return next
+      }
+
+      next[scenarioKey] = {
+        freq: Number.isFinite(values.freq) ? values.freq : undefined,
+        qTest: Number.isFinite(values.qTest) ? values.qTest : undefined,
+        pwfTest: Number.isFinite(values.pwfTest) ? values.pwfTest : undefined
+      }
+
+      const current = next[scenarioKey]
+      if (
+        (current.freq === undefined || current.freq === null) &&
+        (current.qTest === undefined || current.qTest === null) &&
+        (current.pwfTest === undefined || current.pwfTest === null)
+      ) {
+        delete next[scenarioKey]
+      }
+
+      return next
+    })
+  }
+
+  const closeScenarioModal = () => {
+    setOpenScenarioKey(null)
+  }
+
+  const serializeOverrides = (overrides: Record<string, ScenarioOverride>) => {
+    const result: Record<string, any> = {}
+    Object.entries(overrides || {}).forEach(([key, override]) => {
+      if (!override) return
+      const entry: Record<string, number> = {}
+      if (typeof override.qTest === 'number' && Number.isFinite(override.qTest)) {
+        entry.q_test = override.qTest
+      }
+      if (typeof override.pwfTest === 'number' && Number.isFinite(override.pwfTest)) {
+        entry.pwf_test = override.pwfTest
+      }
+      if (typeof override.freq === 'number' && Number.isFinite(override.freq)) {
+        entry.frequency_hz = override.freq
+      }
+      if (Object.keys(entry).length > 0) {
+        result[key] = entry
+      }
+    })
+    return result
+  }
+
+  useEffect(() => {
+    setScenarioOverrides((prev) => {
+      const next: Record<string, ScenarioOverride> = { ...prev }
+      let changed = false
+
+      Object.entries(scenarioDefinitions || {}).forEach(([key, definition]) => {
+        if (next[key]) {
+          return
+        }
+
+        const overrides = (definition as any)?.overrides || {}
+        if (!overrides) return
+
+        const entry: ScenarioOverride = {}
+        if (typeof overrides.q_test === 'number' && Number.isFinite(overrides.q_test)) {
+          entry.qTest = overrides.q_test
+        }
+        if (typeof overrides.pwf_test === 'number' && Number.isFinite(overrides.pwf_test)) {
+          entry.pwfTest = overrides.pwf_test
+        }
+        if (typeof overrides.frequency_hz === 'number' && Number.isFinite(overrides.frequency_hz)) {
+          entry.freq = overrides.frequency_hz
+        }
+
+        if (Object.keys(entry).length > 0) {
+          next[key] = entry
+          changed = true
+        }
+      })
+
+      return changed ? next : prev
+    })
+  }, [scenarioDefinitions])
+
+  const scenarioDisplayValues = useMemo(() => {
+    const result: Record<string, ScenarioDisplayValues> = {}
+    const pumpCurve = !isComparisonMode && numPumpsDesign > 1 ? combinedCurves : curves
+    const pumpQ = pumpCurve?.head?.map((point: any) => Number(point.caudal))
+    const pumpHead = pumpCurve?.head?.map((point: any) => Number(point.valor))
+
+    const demandFallback = primaryDemandCurve?.curve || pressureDemandCurve?.curve || []
+
+    availableScenarioKeys.forEach((key) => {
+      const override = scenarioOverrides?.[key] || {}
+      const definitionOverride = scenarioDefinitions?.[key]?.overrides || {}
+      const demandCurve = pressureDemandScenarios?.[key]?.curve || demandFallback
+
+      let freqValue = override.freq
+      if (freqValue === undefined && typeof definitionOverride.frequency_hz === 'number') {
+        freqValue = definitionOverride.frequency_hz
+      }
+      if (freqValue === undefined && typeof definitionOverride.freq === 'number') {
+        freqValue = definitionOverride.freq
+      }
+      if (freqValue === undefined) {
+        freqValue = freq
+      }
+
+      let qValue = override.qTest
+      if (qValue === undefined && typeof definitionOverride.q_test === 'number') {
+        qValue = definitionOverride.q_test
+      }
+
+      let pwfValue = override.pwfTest
+      if (pwfValue === undefined && typeof definitionOverride.pwf_test === 'number') {
+        pwfValue = definitionOverride.pwf_test
+      }
+
+      if ((qValue === undefined || pwfValue === undefined) && pumpQ && pumpHead && Array.isArray(demandCurve) && demandCurve.length > 0) {
+        const demandQ = demandCurve.map((point: any) => Number(point.caudal))
+        const demandHead = demandCurve.map((point: any) => Number(point.tdh))
+        const intersection = findPumpDemandIntersection(pumpQ, pumpHead, demandQ, demandHead)
+
+        if (intersection) {
+          if (qValue === undefined) {
+            qValue = Number(intersection.q.toFixed(2))
+          }
+
+          if (pwfValue === undefined) {
+            const demandPwfValues = demandCurve.map((point: any) => {
+              if (typeof point.pwf === 'number') return Number(point.pwf)
+              if (typeof point.pip === 'number') return Number(point.pip)
+              return null
+            }).filter((value) => value !== null) as number[]
+
+            if (demandPwfValues.length === demandQ.length) {
+              const interpolated = interpolateValue(demandQ, demandPwfValues, intersection.q)
+              if (interpolated !== null && Number.isFinite(interpolated)) {
+                pwfValue = Number(interpolated.toFixed(2))
+              }
+            }
+          }
+        }
+      }
+
+      if (qValue === undefined) {
+        qValue = qTest
+      }
+
+      if (pwfValue === undefined) {
+        pwfValue = pwfTest
+      }
+
+      result[key] = {
+        freq: typeof freqValue === 'number' && Number.isFinite(freqValue) ? freqValue : freq,
+        qTest: typeof qValue === 'number' && Number.isFinite(qValue) ? qValue : qTest,
+        pwfTest: typeof pwfValue === 'number' && Number.isFinite(pwfValue) ? pwfValue : pwfTest
+      }
+    })
+
+    return result
+  }, [
+    availableScenarioKeys,
+    scenarioOverrides,
+    scenarioDefinitions,
+    pressureDemandScenarios,
+    primaryDemandCurve,
+    pressureDemandCurve,
+    curves,
+    combinedCurves,
+    isComparisonMode,
+    numPumpsDesign,
+    freq,
+    qTest,
+    pwfTest
+  ])
 
   const handleNumPumpsDesignChange = (newCount: number) => {
     setNumPumpsDesign(newCount)
@@ -501,6 +758,11 @@ export default function App() {
         tubing_roughness: tubingRoughness,
         q_max_estimate: 500
       }
+
+      const overridesPayload = serializeOverrides(scenarioOverrides)
+      if (Object.keys(overridesPayload).length > 0) {
+        wellData.sensitivity_overrides = overridesPayload
+      }
       
       const res = await axios.post('/api/calculate_conditions', wellData)
       const payload = res.data || {}
@@ -625,7 +887,8 @@ export default function App() {
     tubingIdMm,
     tubingRoughness,
     // IMPORTANTE: Recalcular cuando cambia el número de bombas
-    numPumpsDesign
+    numPumpsDesign,
+    scenarioOverrides
   ])
   
   // useEffect para actualizar curvas en modo comparador
@@ -1081,6 +1344,9 @@ export default function App() {
         onToggleScenario={handleScenarioToggle}
         scenarioStyles={scenarioStyles}
         scenarioOrder={availableScenarioKeys}
+        showScenarioOverlay={true}
+        onScenarioConfigure={handleScenarioConfigure}
+        scenarioOverrides={scenarioDisplayValues}
       />
     </div>
   )
@@ -1329,6 +1595,14 @@ export default function App() {
           </div>
         </section>
       </div>
+      <ScenarioSensitivityModal
+        open={openScenarioKey !== null}
+        scenarioKey={openScenarioKey}
+        scenarioLabel={openScenarioKey ? scenarioStyles?.[openScenarioKey]?.label : undefined}
+        values={openScenarioKey ? scenarioDisplayValues?.[openScenarioKey] : null}
+        onClose={closeScenarioModal}
+        onSave={handleScenarioOverrideSave}
+      />
     </div>
   )
 }

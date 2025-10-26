@@ -55,7 +55,9 @@ def calculate_conditions():
     Recibe los datos del pozo y calcula el IPR, TDH y curva de demanda de presión.
     """
     try:
-        well_data = request.json
+        payload = request.json or {}
+        well_data = dict(payload)
+        sensitivity_overrides = well_data.pop('sensitivity_overrides', {}) or {}
         
         # Convertir rugosidad de string a valor numérico
         if 'tubing_roughness' in well_data:
@@ -63,15 +65,31 @@ def calculate_conditions():
             roughness_map = tubing_catalog.get_roughness_options()
             well_data['tubing_roughness_mm'] = roughness_map.get(roughness_key, 0.046)  # Default: acero nuevo
         
+        def apply_override(target, override_data):
+            if not isinstance(target, dict) or not isinstance(override_data, dict):
+                return target
+
+            q_override = override_data.get('q_test')
+            pwf_override = override_data.get('pwf_test')
+
+            if q_override is not None:
+                target['q_test'] = q_override
+            if pwf_override is not None:
+                target['pwf_test'] = pwf_override
+
+            return target
+
         # 1. Calcular IPR (Aporte del pozo)
-        ipr_result = well_performance.calculate_ipr(well_data)
+        base_well_data = apply_override(dict(well_data), sensitivity_overrides.get('conservative', {}))
+
+        ipr_result = well_performance.calculate_ipr(base_well_data)
         
         # 2. Calcular TDH (Carga Dinámica Total)
-        system_head_curve = hydraulic_calculations.calculate_system_head_curve(well_data)
+        system_head_curve = hydraulic_calculations.calculate_system_head_curve(base_well_data)
 
         # 3. Calcular curva de demanda de presión (Presión vs Caudal)
         # Pasamos el IPR para usar la presión de intake real en cada caudal
-        pressure_demand_curve = hydraulic_calculations.calculate_pressure_demand_curve(well_data, ipr_result)
+        pressure_demand_curve = hydraulic_calculations.calculate_pressure_demand_curve(base_well_data, ipr_result)
         
         # DEBUG: Imprimir primeros 3 puntos de la curva de demanda
         print("\n" + "="*80)
@@ -100,26 +118,37 @@ def calculate_conditions():
                     'color': config.get('color')
                 }
 
+                override_data = sensitivity_overrides.get(key, {})
+
+                if override_data:
+                    scenario_definitions[key]['overrides'] = {
+                        k: override_data.get(k)
+                        for k in ('q_test', 'pwf_test', 'frequency_hz')
+                        if override_data.get(k) is not None
+                    }
+
                 if key == 'conservative':
                     ipr_scenarios[key] = deepcopy(ipr_result)
                     pressure_demand_scenarios[key] = deepcopy(pressure_demand_curve)
                     continue
 
-                scenario_ipr = well_performance.scale_ipr_curve(
-                    ipr_result,
-                    config.get('ipr_scale', 1.0),
-                    scenario_key=key
-                )
-
-                if not scenario_ipr:
-                    scenario_ipr = deepcopy(ipr_result)
-
-                scenario_well_data = dict(well_data)
+                scenario_well_data = apply_override(dict(well_data), override_data)
                 surface_multiplier = config.get('surface_pressure_multiplier', 1.0)
                 roughness_multiplier = config.get('roughness_multiplier', 1.0)
 
                 scenario_well_data['presion_superficie'] = scenario_well_data.get('presion_superficie', 10) * surface_multiplier
                 scenario_well_data['tubing_roughness_mm'] = base_roughness * roughness_multiplier
+
+                scenario_ipr = well_performance.calculate_ipr(scenario_well_data)
+                scenario_scale = config.get('ipr_scale', 1.0)
+                if scenario_scale and scenario_scale != 1.0:
+                    scaled = well_performance.scale_ipr_curve(
+                        scenario_ipr,
+                        scenario_scale,
+                        scenario_key=key
+                    )
+                    if scaled:
+                        scenario_ipr = scaled
 
                 scenario_pressure_demand = hydraulic_calculations.calculate_pressure_demand_curve(
                     scenario_well_data,

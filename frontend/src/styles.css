@@ -4,6 +4,16 @@
   box-sizing: border-box;
 }
 
+:root {
+  font-size: 11.5px;
+}
+
+@media (max-width: 768px) {
+  :root {
+    font-size: 10.5px;
+  }
+}
+
 html, body {
   width: 100%;
   height: 100%;
@@ -16,6 +26,33 @@ body {
   color: #f1f5ff;
   min-height: 100vh;
   padding: 0;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="tel"],
+select,
+textarea {
+  background: rgba(11, 18, 30, 0.95);
+  color: #e4ebff;
+  border: 1px solid rgba(102, 126, 234, 0.55);
+  font-weight: 500;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="search"]:focus,
+input[type="tel"]:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(118, 75, 162, 0.95);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.35);
 }
 
 #root {
@@ -46,7 +83,7 @@ body {
 }
 
 .app h1 {
-  font-size: clamp(1.5rem, 4vw, 2.5rem);
+  font-size: clamp(1.2rem, 3.2vw, 1.9rem);
   color: #9cc0ff;
   margin-bottom: 20px;
   text-align: center;
@@ -669,6 +706,16 @@ body, html, #root {
   border-color: #27ae60 !important;
 }
 
+.toggle-chip--sensitivity-active {
+  border-color: #f39c12 !important;
+}
+
+.toggle-chip--disabled {
+  opacity: 0.55;
+  pointer-events: none;
+  filter: grayscale(0.15);
+}
+
 .config-tabs {
   background: rgba(12, 19, 34, 0.95);
   border-radius: 16px;
@@ -723,6 +770,58 @@ body, html, #root {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.sensitivity-table-card {
+  gap: 16px;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.sensitivity-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: #dbe4ff;
+  font-size: 0.85rem;
+}
+
+.sensitivity-table.sensitivity-table--scenario-grid thead th,
+.sensitivity-table.sensitivity-table--scenario-grid tbody td {
+  text-align: center;
+}
+
+.sensitivity-table.sensitivity-table--scenario-grid thead th:first-child,
+.sensitivity-table.sensitivity-table--scenario-grid tbody td.metric-label {
+  text-align: left;
+}
+
+.sensitivity-table.sensitivity-table--scenario-grid tbody td.metric-label {
+  color: #9fb7ff;
+  font-weight: 600;
+}
+
+.sensitivity-table.sensitivity-table--scenario-grid tbody td.scenario-value {
+  font-weight: 600;
+}
+
+.sensitivity-table thead th {
+  text-align: left;
+  padding: 10px 12px;
+  color: #9fb7ff;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(105, 134, 214, 0.35);
+}
+
+.sensitivity-table tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(76, 102, 169, 0.25);
+}
+
+.sensitivity-table tbody tr:hover {
+  background: rgba(42, 58, 101, 0.35);
 }
 
 .panel-card--no-padding {

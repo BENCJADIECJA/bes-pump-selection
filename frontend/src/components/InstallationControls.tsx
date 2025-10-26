@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
 
@@ -38,6 +39,17 @@ export default function InstallationControls(props: InstallationControlsProps) {
   const [tubingCatalog, setTubingCatalog] = useState<TubingOption[]>([])
   const [roughnessOptions, setRoughnessOptions] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(false)
+
+  const CONTROL_SURFACE = '#15233d'
+  const getFieldStyle = (borderColor: string, overrides: any = {}) => ({
+    padding: '8px 12px',
+    borderRadius: '6px',
+    border: `1px solid ${borderColor}`,
+    background: CONTROL_SURFACE,
+    color: '#e4ecff',
+    boxShadow: 'inset 0 1px 0 rgba(0, 0, 0, 0.25)',
+    ...overrides
+  })
 
   // Cargar catálogo de tuberías al montar el componente
   useEffect(() => {
@@ -99,7 +111,7 @@ export default function InstallationControls(props: InstallationControlsProps) {
                   min="100"
                   max="5000"
                   step="10"
-                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white', maxWidth: '280px' }}
+                  style={getFieldStyle('#3498db', { maxWidth: '280px' })}
                   title="Profundidad de instalación del intake de la bomba desde superficie"
                 />
               </label>
@@ -114,7 +126,7 @@ export default function InstallationControls(props: InstallationControlsProps) {
                   <select
                     value={tubingSelected}
                     onChange={(e) => handleTubingChange(e.target.value)}
-                    style={{ padding: '8px 12px', borderRadius: '6px', border: '2px solid #9b59b6', background: 'white', fontSize: '0.95rem' }}
+                    style={getFieldStyle('#9b59b6', { borderWidth: '2px', fontSize: '0.95rem' })}
                   >
                     {tubingCatalog.map((tubing) => (
                       <option key={tubing.nombre} value={tubing.nombre}>
@@ -129,7 +141,7 @@ export default function InstallationControls(props: InstallationControlsProps) {
                     type="number"
                     value={tubingIdMm}
                     readOnly
-                    style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #b0bcdc', background: '#1b253a', color: '#dce8ff' }}
+                    style={getFieldStyle('#b0bcdc', { background: '#101a2c', color: '#dce8ff' })}
                     title="Diámetro interno de la tubería (calculado automáticamente)"
                   />
                 </label>
@@ -138,7 +150,7 @@ export default function InstallationControls(props: InstallationControlsProps) {
                   <select
                     value={tubingRoughness}
                     onChange={(e) => setTubingRoughness(e.target.value)}
-                    style={{ padding: '8px 12px', borderRadius: '6px', border: '2px solid #9b59b6', background: 'white', fontSize: '0.95rem' }}
+                    style={getFieldStyle('#9b59b6', { borderWidth: '2px', fontSize: '0.95rem' })}
                   >
                     {Object.entries(roughnessOptions).map(([key, value]) => (
                       <option key={key} value={key}>
@@ -163,7 +175,7 @@ export default function InstallationControls(props: InstallationControlsProps) {
                     min="0"
                     max="100"
                     step="1"
-                    style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #2ecc71', background: 'white' }}
+                    style={getFieldStyle('#2ecc71')}
                     title="Presión deseada en el cabezal del pozo"
                   />
                 </label>
@@ -176,7 +188,7 @@ export default function InstallationControls(props: InstallationControlsProps) {
                     min="0"
                     max="100"
                     step="1"
-                    style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #2ecc71', background: 'white' }}
+                    style={getFieldStyle('#2ecc71')}
                     title="Presión en el anular (casing) - ayuda a empujar el fluido hacia la bomba"
                   />
                 </label>

@@ -40,6 +40,9 @@ interface IPRControlsProps {
   onToggleScenario: (key: string) => void
   scenarioStyles: { [key: string]: any }
   scenarioOrder: string[]
+  showScenarioOverlay?: boolean
+  onScenarioConfigure?: (key: string) => void
+  scenarioOverrides?: { [key: string]: any }
 }
 
 export default function IPRControls(props: IPRControlsProps) {
@@ -64,8 +67,22 @@ export default function IPRControls(props: IPRControlsProps) {
     scenarioVisibility,
     onToggleScenario,
     scenarioStyles,
-    scenarioOrder
+    scenarioOrder,
+    showScenarioOverlay,
+    onScenarioConfigure,
+    scenarioOverrides
   } = props
+
+  const CONTROL_SURFACE = '#15233d'
+  const getFieldStyle = (borderColor: string, overrides: any = {}) => ({
+    padding: '8px 12px',
+    borderRadius: '6px',
+    border: `1px solid ${borderColor}`,
+    background: CONTROL_SURFACE,
+    color: '#e4ecff',
+    boxShadow: 'inset 0 1px 0 rgba(0, 0, 0, 0.25)',
+    ...overrides
+  })
 
   // Calcular PI automáticamente para método Linear cuando se ingresan Q y Pwf
   const handleQTestChange = (newQTest: number) => {
@@ -104,7 +121,7 @@ export default function IPRControls(props: IPRControlsProps) {
             <select
               value={method}
               onChange={(e) => setMethod(e.target.value)}
-              style={{ padding: '8px 12px', borderRadius: '6px', border: '2px solid #3498db', background: 'white', fontSize: '0.95rem' }}
+              style={getFieldStyle('#3498db', { borderWidth: '2px', fontSize: '0.95rem' })}
             >
               <option value="linear">Linear (Darcy - Monofásico)</option>
               <option value="vogel">Vogel (Bifásico - Gas en solución)</option>
@@ -114,43 +131,78 @@ export default function IPRControls(props: IPRControlsProps) {
           </label>
         </div>
 
-        <div style={{ marginBottom: '18px', padding: '12px', background: 'rgba(142, 68, 173, 0.15)', borderRadius: '8px', border: '1px solid rgba(142, 68, 173, 0.45)' }}>
-          <h4 style={{ margin: '0 0 10px 0', color: '#c7b3ff', fontSize: '0.95rem' }}>Scenario Overlays</h4>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-            {scenarioOrder && scenarioOrder.length > 0 ? (
-              scenarioOrder.map((key) => {
-                const style = scenarioStyles?.[key] || {}
-                const isChecked = !!scenarioVisibility?.[key]
-                return (
-                  <label
-                    key={key}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '6px 12px',
-                      borderRadius: '18px',
-                      border: `1px solid ${style.color || '#95a5a6'}`,
-                      background: isChecked ? 'rgba(46, 204, 113, 0.18)' : 'rgba(44, 62, 80, 0.35)',
-                      boxShadow: isChecked ? `0 0 6px rgba(46, 204, 113, 0.45)` : 'none',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => onToggleScenario(key)}
-                      style={{ accentColor: style.color || '#3498db' }}
-                    />
-                    <span style={{ fontWeight: 600, color: style.color || '#d6def7' }}>{style.label || key}</span>
-                  </label>
-                )
-              })
-            ) : (
-              <span style={{ color: '#95a5a6', fontStyle: 'italic' }}>No scenarios available</span>
-            )}
+        {showScenarioOverlay && (
+          <div style={{ marginBottom: '18px', padding: '12px', background: 'rgba(142, 68, 173, 0.15)', borderRadius: '8px', border: '1px solid rgba(142, 68, 173, 0.45)' }}>
+            <h4 style={{ margin: '0 0 10px 0', color: '#c7b3ff', fontSize: '0.95rem' }}>Scenario Overlays</h4>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+              {scenarioOrder && scenarioOrder.length > 0 ? (
+                scenarioOrder.map((key) => {
+                  const style = scenarioStyles?.[key] || {}
+                  const isChecked = !!scenarioVisibility?.[key]
+                  const override = scenarioOverrides?.[key] || {}
+                  const freqText = override?.freq !== undefined ? `${Number(override.freq).toFixed(1)} Hz` : null
+                  return (
+                    <div
+                      key={key}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '6px 10px',
+                        borderRadius: '18px',
+                        border: `1px solid ${style.color || '#95a5a6'}`,
+                        background: isChecked ? 'rgba(46, 204, 113, 0.18)' : 'rgba(44, 62, 80, 0.35)',
+                        boxShadow: isChecked ? `0 0 6px rgba(46, 204, 113, 0.45)` : 'none'
+                      }}
+                    >
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => onToggleScenario(key)}
+                          style={{ accentColor: style.color || '#3498db' }}
+                        />
+                        <span style={{ fontWeight: 600, color: style.color || '#d6def7' }}>{style.label || key}</span>
+                        {freqText && (
+                          <span style={{ fontSize: '0.8rem', color: '#cfd8ff', fontWeight: 500 }}>({freqText})</span>
+                        )}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          onScenarioConfigure && onScenarioConfigure(key)
+                        }}
+                        style={{
+                          padding: '4px 8px',
+                          borderRadius: '12px',
+                          border: '1px solid rgba(142, 68, 173, 0.6)',
+                          background: 'rgba(22, 33, 58, 0.65)',
+                          color: '#d0b9ff',
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Ajustar
+                      </button>
+                    </div>
+                  )
+                })
+              ) : (
+                <span style={{ color: '#95a5a6', fontStyle: 'italic' }}>No scenarios available</span>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Propiedades del Fluido */}
         <div style={{ marginBottom: '15px', padding: '12px', background: 'rgba(22, 160, 133, 0.1)', borderRadius: '6px', border: '1px solid rgba(22, 160, 133, 0.3)' }}>
@@ -165,7 +217,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 min="5"
                 max="60"
                 step="0.5"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #16a085', background: 'white' }}
+                style={getFieldStyle('#16a085')}
                 title="Grado API del petróleo (típico: 15-40)"
               />
             </label>
@@ -178,7 +230,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 min="0"
                 max="100"
                 step="1"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #16a085', background: 'white' }}
+                style={getFieldStyle('#16a085')}
                 title="Porcentaje de agua en el fluido producido"
               />
             </label>
@@ -191,7 +243,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 min="1.000"
                 max="1.200"
                 step="0.001"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #16a085', background: 'white' }}
+                style={getFieldStyle('#16a085')}
                 title="Gravedad específica del agua (típico: 1.000-1.100)"
               />
             </label>
@@ -208,7 +260,7 @@ export default function IPRControls(props: IPRControlsProps) {
               onChange={(e) => handlePresionReservorioChange(Number(e.target.value))}
               min="0"
               step="10"
-              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+              style={getFieldStyle('#3498db')}
             />
           </label>
 
@@ -223,7 +275,7 @@ export default function IPRControls(props: IPRControlsProps) {
                   onChange={(e) => handleQTestChange(Number(e.target.value))}
                   min="0"
                   step="10"
-                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                  style={getFieldStyle('#3498db')}
                 />
               </label>
               <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -234,7 +286,7 @@ export default function IPRControls(props: IPRControlsProps) {
                   onChange={(e) => handlePwfTestChange(Number(e.target.value))}
                   min="0"
                   step="10"
-                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                  style={getFieldStyle('#3498db')}
                 />
               </label>
               <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -243,7 +295,7 @@ export default function IPRControls(props: IPRControlsProps) {
                   type="number"
                   value={pi}
                   readOnly
-                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #95a5a6', background: '#ecf0f1', color: '#7f8c8d' }}
+                  style={getFieldStyle('#95a5a6', { color: '#9fb0d4', background: '#0f1b32' })}
                   title="PI calculado automáticamente = Q / (Pr - Pwf)"
                 />
               </label>
@@ -260,7 +312,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 onChange={(e) => setPi(Number(e.target.value))}
                 min="0"
                 step="0.1"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                style={getFieldStyle('#3498db')}
               />
             </label>
           )}
@@ -275,7 +327,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 onChange={(e) => setPresionBurbuja(Number(e.target.value))}
                 min="0"
                 step="10"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                style={getFieldStyle('#3498db')}
               />
             </label>
           )}
@@ -291,7 +343,7 @@ export default function IPRControls(props: IPRControlsProps) {
                   onChange={(e) => setQTest(Number(e.target.value))}
                   min="0"
                   step="10"
-                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                  style={getFieldStyle('#3498db')}
                 />
               </label>
               <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -302,7 +354,7 @@ export default function IPRControls(props: IPRControlsProps) {
                   onChange={(e) => setPwfTest(Number(e.target.value))}
                   min="0"
                   step="10"
-                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                  style={getFieldStyle('#3498db')}
                 />
               </label>
             </>
@@ -319,7 +371,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 min="0.1"
                 max="1.5"
                 step="0.1"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                style={getFieldStyle('#3498db')}
               />
             </label>
           )}
@@ -336,7 +388,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 onChange={(e) => setPermeabilidad(Number(e.target.value))}
                 min="0.1"
                 step="1"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                style={getFieldStyle('#3498db')}
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -347,7 +399,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 onChange={(e) => setEspesor(Number(e.target.value))}
                 min="1"
                 step="1"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                style={getFieldStyle('#3498db')}
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -358,7 +410,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 onChange={(e) => setRadioDrenaje(Number(e.target.value))}
                 min="10"
                 step="10"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                style={getFieldStyle('#3498db')}
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -369,7 +421,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 onChange={(e) => setRadioPozo(Number(e.target.value))}
                 min="0.1"
                 step="0.1"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                style={getFieldStyle('#3498db')}
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -380,7 +432,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 onChange={(e) => setViscosidad(Number(e.target.value))}
                 min="0.1"
                 step="0.1"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                style={getFieldStyle('#3498db')}
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -391,7 +443,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 onChange={(e) => setFactorVolumen(Number(e.target.value))}
                 min="1"
                 step="0.01"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                style={getFieldStyle('#3498db')}
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -401,7 +453,7 @@ export default function IPRControls(props: IPRControlsProps) {
                 value={skin}
                 onChange={(e) => setSkin(Number(e.target.value))}
                 step="0.1"
-                style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
+                style={getFieldStyle('#3498db')}
               />
             </label>
           </div>
