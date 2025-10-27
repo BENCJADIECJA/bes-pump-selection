@@ -1,4 +1,4 @@
-// @ts-nocheck
+﻿// @ts-nocheck
 import React, { useEffect, useRef, useState } from 'react'
 
 type ScenarioValues = {
@@ -54,33 +54,113 @@ const containerStyle: React.CSSProperties = {
 }
 
 const modalStyle: React.CSSProperties = {
-  width: 'min(420px, 92vw)',
+  position: 'absolute',
+  pointerEvents: 'auto',
+  width: 'min(480px, 94vw)',
   background: 'linear-gradient(145deg, #0d1526 0%, #101c34 100%)',
-  borderRadius: '14px',
-  border: '1px solid rgba(120, 157, 255, 0.4)',
-  boxShadow: '0 22px 46px rgba(4, 10, 24, 0.65)',
-  padding: '24px',
-  color: '#dbe6ff',
+  borderRadius: '16px',
+  border: '1px solid rgba(120, 157, 255, 0.5)',
+  boxShadow: '0 28px 64px rgba(4, 10, 24, 0.7)',
+  padding: '30px',
+  color: '#e2ebff',
   display: 'flex',
   flexDirection: 'column',
-  gap: '18px',
-  position: 'absolute',
-  pointerEvents: 'auto'
+  gap: '24px'
 }
 
 const headerStyle: React.CSSProperties = {
   display: 'flex',
   justifyContent: 'space-between',
   alignItems: 'center',
-  gap: '12px'
+  gap: '16px'
+}
+
+const headerTitleStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: '1.45rem',
+  color: '#c1d9ff',
+  letterSpacing: '-0.01em',
+  fontWeight: 700,
+  lineHeight: 1.15
+}
+
+const headerSubtitleStyle: React.CSSProperties = {
+  margin: '10px 0 0 0',
+  color: '#a5bff5',
+  fontSize: '1.05rem',
+  fontWeight: 500
+}
+
+const closeButtonStyle: React.CSSProperties = {
+  background: 'transparent',
+  border: 'none',
+  color: '#a5bff5',
+  fontSize: '1.6rem',
+  cursor: 'pointer',
+  lineHeight: 1,
+  padding: 0
+}
+
+const contentStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '22px',
+  paddingTop: '6px'
+}
+
+const fieldLabelStyle: React.CSSProperties = {
+  fontWeight: 650,
+  color: '#dbe6ff',
+  fontSize: '1.08rem',
+  letterSpacing: '-0.005em'
+}
+
+const inputStyle: React.CSSProperties = {
+  padding: '14px 16px',
+  borderRadius: '12px',
+  border: '1px solid rgba(118, 147, 234, 0.75)',
+  background: '#0b1426',
+  color: '#f4f7ff',
+  fontWeight: 600,
+  fontSize: '1.05rem',
+  boxShadow: '0 0 0 1px rgba(74, 103, 190, 0.35) inset'
+}
+
+const footerStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'flex-end',
+  gap: '14px'
+}
+
+const secondaryButtonStyle: React.CSSProperties = {
+  padding: '12px 22px',
+  borderRadius: '12px',
+  border: '1px solid rgba(132, 149, 198, 0.55)',
+  background: 'rgba(18, 31, 56, 0.8)',
+  color: '#cfdbff',
+  fontWeight: 600,
+  fontSize: '1.05rem',
+  cursor: 'pointer'
+}
+
+const primaryButtonStyle: React.CSSProperties = {
+  padding: '12px 24px',
+  borderRadius: '12px',
+  border: '1px solid rgba(118, 147, 234, 0.95)',
+  background: 'linear-gradient(135deg, #4156d8 0%, #8c5ff9 100%)',
+  color: '#f5f7ff',
+  fontWeight: 700,
+  fontSize: '1.08rem',
+  cursor: 'pointer',
+  boxShadow: '0 14px 32px rgba(47, 75, 177, 0.45)'
 }
 
 const computeDefaultPosition = () => {
   if (typeof window === 'undefined') {
     return { x: 160, y: 120 }
   }
-  const width = Math.min(420, window.innerWidth - 32)
-  const height = 320
+  const width = Math.min(480, window.innerWidth - 32)
+  const height = 340
   return {
     x: Math.max((window.innerWidth - width) / 2, 16),
     y: Math.max((window.innerHeight - height) / 2, 16)
@@ -330,30 +410,23 @@ export default function ScenarioSensitivityModal({
           onPointerDown={handlePointerDown}
         >
           <div>
-            <h2 style={{ margin: 0, fontSize: '1.1rem', color: '#9fc3ff' }}>Adjust Scenario</h2>
-            <p style={{ margin: '6px 0 0 0', color: '#8ca1d4', fontSize: '0.75rem' }}>{currentLabel}</p>
+            <h2 style={headerTitleStyle}>Adjust Scenario</h2>
+            <p style={headerSubtitleStyle}>{currentLabel}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
             onPointerDown={(event) => event.stopPropagation()}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#8ca1d4',
-              fontSize: '1rem',
-              cursor: 'pointer',
-              lineHeight: 1
-            }}
+            style={closeButtonStyle}
             aria-label="Close sensitivity dialog"
           >
             ×
           </button>
         </header>
 
-  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingTop: '4px' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <span style={{ fontWeight: 600, color: '#d3e1ff', fontSize: '0.8rem' }}>Frequency (Hz)</span>
+        <div style={contentStyle}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span style={fieldLabelStyle}>Frequency (Hz)</span>
             <input
               type="number"
               value={freq}
@@ -361,72 +434,39 @@ export default function ScenarioSensitivityModal({
               min={30}
               max={70}
               step={0.5}
-              style={{
-                padding: '8px 10px',
-                borderRadius: '8px',
-                border: '1px solid rgba(118, 147, 234, 0.6)',
-                background: '#0b1426',
-                color: '#e2eaff',
-                fontWeight: 600,
-                fontSize: '0.85rem'
-              }}
+              style={inputStyle}
             />
           </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <span style={{ fontWeight: 600, color: '#d3e1ff', fontSize: '0.8rem' }}>Q Test (m³/d)</span>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span style={fieldLabelStyle}>Q Test (m3/d)</span>
             <input
               type="number"
               value={qTest}
               onChange={(event) => setQTest(event.target.value)}
               min={0}
               step={5}
-              style={{
-                padding: '8px 10px',
-                borderRadius: '8px',
-                border: '1px solid rgba(118, 147, 234, 0.6)',
-                background: '#0b1426',
-                color: '#e2eaff',
-                fontWeight: 600,
-                fontSize: '0.85rem'
-              }}
+              style={inputStyle}
             />
           </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <span style={{ fontWeight: 600, color: '#d3e1ff', fontSize: '0.8rem' }}>Pwf Test (bar)</span>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span style={fieldLabelStyle}>Pwf Test (bar)</span>
             <input
               type="number"
               value={pwfTest}
               onChange={(event) => setPwfTest(event.target.value)}
               min={0}
               step={1}
-              style={{
-                padding: '8px 10px',
-                borderRadius: '8px',
-                border: '1px solid rgba(118, 147, 234, 0.6)',
-                background: '#0b1426',
-                color: '#e2eaff',
-                fontWeight: 600,
-                fontSize: '0.85rem'
-              }}
+              style={inputStyle}
             />
           </label>
         </div>
 
-        <footer style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+        <footer style={footerStyle}>
           <button
             type="button"
             onClick={handleCancel}
             onPointerDown={(event) => event.stopPropagation()}
-            style={{
-              padding: '8px 16px',
-              borderRadius: '8px',
-              border: '1px solid rgba(132, 149, 198, 0.5)',
-              background: 'rgba(16, 28, 50, 0.6)',
-              color: '#a8bdf0',
-              fontWeight: 600,
-              fontSize: '0.85rem',
-              cursor: 'pointer'
-            }}
+            style={secondaryButtonStyle}
           >
             Cancel
           </button>
@@ -434,17 +474,7 @@ export default function ScenarioSensitivityModal({
             type="button"
             onClick={onClose}
             onPointerDown={(event) => event.stopPropagation()}
-            style={{
-              padding: '8px 16px',
-              borderRadius: '8px',
-              border: '1px solid rgba(118, 147, 234, 0.9)',
-              background: 'linear-gradient(135deg, #3a4bc8 0%, #8559f6 100%)',
-              color: '#f5f7ff',
-              fontWeight: 700,
-              fontSize: '0.9rem',
-              cursor: 'pointer',
-              boxShadow: '0 12px 28px rgba(47, 75, 177, 0.4)'
-            }}
+            style={primaryButtonStyle}
           >
             Close
           </button>

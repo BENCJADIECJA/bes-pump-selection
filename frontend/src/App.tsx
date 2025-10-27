@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
+import * as XLSX from 'xlsx'
 import PumpSelector from './components/PumpSelector'
 import CurveControls from './components/CurveControls'
 import CurvePlot from './components/CurvePlot'
@@ -1418,38 +1419,19 @@ export default function App() {
       </div>
       <div className="panel-card">
         <h3 className="panel-heading">Pump Lineup</h3>
-        <div
-          className="multi-pump-grid"
-          style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(numPumpsDesign, 2)}, 1fr)`, gap: '16px' }}
-        >
+        <div className="multi-pump-grid pump-card-grid">
           {[...Array(numPumpsDesign)].map((_, idx) => (
-            <div
-              key={`design-pump-${idx}`}
-              style={{
-                padding: '16px',
-                background: 'linear-gradient(180deg, #ffffff 0%, #f6f8fb 100%)',
-                borderRadius: '10px',
-                border: '1px solid #dce3f0',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '14px'
-              }}
-            >
-              <h4 style={{ margin: 0, color: '#3498db', fontSize: '1rem', fontWeight: 600 }}>Pump {idx + 1}</h4>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <span style={{ fontWeight: 600, color: '#34495e' }}>Select Pump</span>
+            <div key={`design-pump-${idx}`} className="pump-card">
+              <h4 className="pump-card__title">Pump {idx + 1}</h4>
+              <label className="pump-card__field">
+                <span className="pump-card__label">Select Pump</span>
                 <select
+                  className="pump-card__control"
                   value={designPumps[idx]?.id || ''}
                   onChange={(event) => {
                     const newPumps = [...designPumps]
                     newPumps[idx] = { ...newPumps[idx], id: event.target.value || null }
                     setDesignPumps(newPumps)
-                  }}
-                  style={{
-                    padding: '8px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid #3498db',
-                    background: 'white'
                   }}
                 >
                   <option value="">-- Select --</option>
@@ -1460,9 +1442,10 @@ export default function App() {
                   ))}
                 </select>
               </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <span style={{ fontWeight: 600, color: '#34495e' }}>Stages</span>
+              <label className="pump-card__field">
+                <span className="pump-card__label">Stages</span>
                 <input
+                  className="pump-card__control"
                   type="number"
                   value={designPumps[idx]?.stages || 300}
                   onChange={(event) => {
@@ -1473,7 +1456,6 @@ export default function App() {
                   min={1}
                   max={500}
                   step={1}
-                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
                 />
               </label>
             </div>
@@ -1508,9 +1490,9 @@ export default function App() {
           </label>
         </div>
       </div>
-      <div className="panel-card">
+        <div className="panel-card">
         <h3 className="panel-heading">Pump Parameters</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${numPumpsToCompare}, 1fr)`, gap: '18px' }}>
+        <div className="pump-card-grid pump-card-grid--comparison">
           {[1, 2, 3].slice(0, numPumpsToCompare).map((num) => {
             const pumpState =
               num === 1
@@ -1520,25 +1502,14 @@ export default function App() {
                 : { pump: pump3, setPump: setPump3, freq: pump3Freq, setFreq: setPump3Freq, stages: pump3Stages, setStages: setPump3Stages, multiFreq: pump3MultiFreq, setMultiFreq: setPump3MultiFreq }
 
             return (
-              <div
-                key={`comparison-pump-${num}`}
-                style={{
-                  padding: '14px',
-                  borderRadius: '10px',
-                  border: '1px solid #e1e6f0',
-                  background: 'linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px'
-                }}
-              >
-                <h4 style={{ margin: 0, color: '#3498db', textAlign: 'center' }}>Pump {num}</h4>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <span style={{ fontWeight: 600, color: '#34495e' }}>Select Pump</span>
+              <div key={`comparison-pump-${num}`} className="pump-card pump-card--comparison">
+                <h4 className="pump-card__title pump-card__title--centered">Pump {num}</h4>
+                <label className="pump-card__field">
+                  <span className="pump-card__label">Select Pump</span>
                   <select
+                    className="pump-card__control"
                     value={pumpState.pump || ''}
                     onChange={(event) => pumpState.setPump(event.target.value || null)}
-                    style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
                   >
                     <option value="">-- Select --</option>
                     {pumps.map((pumpId) => (
@@ -1548,7 +1519,7 @@ export default function App() {
                     ))}
                   </select>
                 </label>
-                <label className="checkbox-label" style={{ justifyContent: 'center' }}>
+                <label className="checkbox-label pump-card__toggle">
                   <input
                     type="checkbox"
                     checked={pumpState.multiFreq}
@@ -1557,29 +1528,29 @@ export default function App() {
                   <span>Multi-Frequency Mode</span>
                 </label>
                 {!pumpState.multiFreq && (
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <span style={{ fontWeight: 600, color: '#34495e' }}>Frequency (Hz)</span>
+                  <label className="pump-card__field">
+                    <span className="pump-card__label">Frequency (Hz)</span>
                     <input
+                      className="pump-card__control"
                       type="number"
                       value={pumpState.freq}
                       onChange={(event) => pumpState.setFreq(Number(event.target.value))}
                       min={30}
                       max={70}
                       step={0.1}
-                      style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
                     />
                   </label>
                 )}
-                <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <span style={{ fontWeight: 600, color: '#34495e' }}>Stages</span>
+                <label className="pump-card__field">
+                  <span className="pump-card__label">Stages</span>
                   <input
+                    className="pump-card__control"
                     type="number"
                     value={pumpState.stages}
                     onChange={(event) => pumpState.setStages(Number(event.target.value))}
                     min={1}
                     max={500}
                     step={1}
-                    style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #3498db', background: 'white' }}
                   />
                 </label>
               </div>
@@ -1784,29 +1755,91 @@ export default function App() {
         return `${value.toFixed(digits)}${suffix ? ` ${suffix}` : ''}`
       }
 
-      const metrics = [
-        { key: 'flow', label: 'Flow (m³/d)', format: (value: any) => formatNumber(value, 1) },
-        { key: 'head', label: 'TDH (m)', format: (value: any) => formatNumber(value, 1) },
-        { key: 'pwf', label: 'Pwf (bar)', format: (value: any) => formatNumber(value, 2) },
-        { key: 'pip', label: 'PIP (bar)', format: (value: any) => formatNumber(value, 2) },
-        { key: 'frequency', label: 'Frequency (Hz)', format: (value: any) => formatNumber(value, 1) },
-        {
-          key: 'efficiency',
-          label: 'Efficiency (%)',
-          format: (value: any) => {
-            const formatted = formatNumber(value, 1)
-            return formatted === '—' ? formatted : `${formatted} %`
-          }
-        },
-        { key: 'bhp', label: 'BHP (HP)', format: (value: any) => formatNumber(value, 1) },
-        { key: 'fluidLevel', label: 'Fluid Level (m)', format: (value: any) => formatNumber(value, 1) },
-        { key: 'submergence', label: 'Submergence (m)', format: (value: any) => formatNumber(value, 1) },
-        { key: 'friction', label: 'Friction Loss (m)', format: (value: any) => formatNumber(value, 1) }
+      const metricDefinitions = [
+        { key: 'flow', label: 'Flow (m³/d)', digits: 1 },
+        { key: 'head', label: 'TDH (m)', digits: 1 },
+        { key: 'pwf', label: 'Pwf (bar)', digits: 2 },
+        { key: 'pip', label: 'PIP (bar)', digits: 2 },
+        { key: 'frequency', label: 'Frequency (Hz)', digits: 1 },
+        { key: 'efficiency', label: 'Efficiency (%)', digits: 1, suffix: '%' },
+        { key: 'bhp', label: 'BHP (HP)', digits: 1 },
+        { key: 'fluidLevel', label: 'Fluid Level (m)', digits: 1 },
+        { key: 'submergence', label: 'Submergence (m)', digits: 1 },
+        { key: 'friction', label: 'Friction Loss (m)', digits: 1 }
       ]
+
+      const metrics = metricDefinitions.map((definition) => ({
+        ...definition,
+        format: (value: any) => formatNumber(value, definition.digits, definition.suffix)
+      }))
+
+      const exportScenarioOperatingPoints = () => {
+        const headers = [
+          'Metric',
+          ...activeScenarioKeysForTable.map(
+            (scenarioKey) => scenarioStyles?.[scenarioKey]?.label || scenarioKey
+          )
+        ]
+
+        const rows = metrics.map((metric) => {
+          const rowValues: (string | number | null)[] = [metric.label]
+          activeScenarioKeysForTable.forEach((scenarioKey) => {
+            const summary = summariesByKey[scenarioKey]
+            const value = summary ? summary[metric.key as keyof typeof summary] : null
+            if (typeof value === 'number' && Number.isFinite(value)) {
+              rowValues.push(value)
+            } else {
+              rowValues.push(null)
+            }
+          })
+          return rowValues
+        })
+
+        const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows])
+        const totalColumns = headers.length
+        const totalRows = rows.length + 1
+
+        worksheet['!cols'] = [
+          { wch: 26 },
+          ...Array.from({ length: totalColumns - 1 }, () => ({ wch: 18 }))
+        ]
+
+        const rangeRef = XLSX.utils.encode_range({
+          s: { r: 0, c: 0 },
+          e: { r: totalRows - 1, c: totalColumns - 1 }
+        })
+
+        worksheet['!autofilter'] = { ref: rangeRef }
+        worksheet['!freeze'] = { xSplit: 1, ySplit: 1 }
+
+        metrics.forEach((metric, metricIndex) => {
+          const decimalPattern = metric.digits > 0 ? `0.${'0'.repeat(metric.digits)}` : '0'
+          activeScenarioKeysForTable.forEach((_, scenarioIndex) => {
+            const cellRef = XLSX.utils.encode_cell({ r: metricIndex + 1, c: scenarioIndex + 1 })
+            const cell = worksheet[cellRef]
+            if (cell && typeof cell.v === 'number') {
+              cell.z = decimalPattern
+            }
+          })
+        })
+
+        const workbook = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Operating Points')
+        XLSX.writeFile(workbook, 'system-operating-points.xlsx')
+      }
 
       return (
         <div className="panel-card sensitivity-table-card">
-          <h3 className="panel-heading">System Operating Points</h3>
+          <div className="panel-heading-row">
+            <h3 className="panel-heading">System Operating Points</h3>
+            <button
+              type="button"
+              className="panel-action-button panel-action-button--excel"
+              onClick={exportScenarioOperatingPoints}
+            >
+              Export to Excel
+            </button>
+          </div>
           <div className="table-wrapper">
             <table className="sensitivity-table sensitivity-table--scenario-grid">
               <thead>
