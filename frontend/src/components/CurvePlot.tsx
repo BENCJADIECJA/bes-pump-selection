@@ -184,7 +184,8 @@ export default function CurvePlot({
   scenarioVisibility,
   scenarioStyles,
   scenarioOrder,
-  activeScenarioKey
+  activeScenarioKey,
+  hideDemandWithinIPR
 }: any) {
   if (isDemandMode) {
     return (
@@ -206,6 +207,7 @@ export default function CurvePlot({
         {...sensitivityPumpData}
         scenarioStyles={scenarioStyles}
         scenarioOrder={scenarioOrder}
+        scenarioVisibility={scenarioVisibility}
       />
     )
   }
@@ -215,11 +217,15 @@ export default function CurvePlot({
     return (
       <IPRPlot
         iprData={iprData}
+        pressureDemandCurve={pressureDemandCurve}
+        basePressureDemandCurve={basePressureDemandCurve}
+        pressureDemandScenarios={pressureDemandScenarios}
         iprScenarios={iprScenarios}
         scenarioVisibility={scenarioVisibility}
         scenarioStyles={scenarioStyles}
         scenarioOrder={scenarioOrder}
         activeScenarioKey={activeScenarioKey}
+        hideDemandWithinIPR={hideDemandWithinIPR}
       />
     )
   }
@@ -722,11 +728,21 @@ function SensitivityPumpPlot({
   scenarioMeta,
   operatingPoints,
   scenarioOrder,
-  scenarioStyles
+  scenarioStyles,
+  scenarioVisibility
 }: any) {
   const keys = (Array.isArray(scenarioOrder) && scenarioOrder.length > 0
     ? scenarioOrder
-    : Object.keys(pumpCurves || {})).filter((key) => pumpCurves?.[key]?.head && Array.isArray(pumpCurves?.[key]?.head))
+    : Object.keys(pumpCurves || {})).filter((key) => {
+    const hasCurve = pumpCurves?.[key]?.head && Array.isArray(pumpCurves?.[key]?.head)
+    if (!hasCurve) {
+      return false
+    }
+    if (scenarioVisibility && Object.prototype.hasOwnProperty.call(scenarioVisibility, key)) {
+      return Boolean(scenarioVisibility[key])
+    }
+    return true
+  })
 
   const plotData: any[] = []
 
@@ -2175,15 +2191,19 @@ function IndividualBhpPlot({ data }: any) {
 // Componente dedicado para IPR Analysis - SOLO curva IPR
 function IPRPlot({
   iprData,
+  pressureDemandCurve,
+  basePressureDemandCurve,
+  pressureDemandScenarios,
   iprScenarios,
   scenarioVisibility,
   scenarioStyles,
   scenarioOrder,
-  activeScenarioKey
+  activeScenarioKey,
+  hideDemandWithinIPR
 }: any) {
   if (!iprData || !Array.isArray(iprData.curve) || iprData.curve.length === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: '32px', color: '#7f8c8d', fontSize: '1.1rem' }}>
+      <div style={{ textAlign: 'center', padding: '32px', color: '#7f8c8d', fontSize: '0.95rem' }}>
         📊 Configure IPR parameters to see the well performance curve
       </div>
     )
@@ -2193,16 +2213,26 @@ function IPRPlot({
     ? scenarioOrder
     : Object.keys(iprScenarios || {})
 
-  const fallbackScenarioKey = configuredOrder.includes('conservative')
-    ? 'conservative'
-    : (configuredOrder[0] || 'conservative')
+  const includeDemand = !hideDemandWithinIPR
 
   const activeKeys = configuredOrder.filter((key) => scenarioVisibility?.[key])
-  const keysToPlot = (activeKeys.length > 0 ? activeKeys : [fallbackScenarioKey]).filter(Boolean)
+  const fallbackKey = activeScenarioKey
+    || (configuredOrder.includes('conservative') ? 'conservative' : configuredOrder[0])
+    || 'conservative'
 
   const iprSeries: any[] = []
+  const demandSeries: any[] = []
   const iprSourceMap = iprScenarios || {}
+  const demandSourceMap = includeDemand ? (pressureDemandScenarios || {}) : {}
   const baseIprSource = iprData
+  const fallbackDemandSource = !includeDemand
+    ? null
+    : ((basePressureDemandCurve && Array.isArray(basePressureDemandCurve.curve) && basePressureDemandCurve.curve.length > 0
+      ? basePressureDemandCurve
+      : null)
+      || (pressureDemandCurve && Array.isArray(pressureDemandCurve.curve) && pressureDemandCurve.curve.length > 0
+        ? pressureDemandCurve
+        : null))
 
   const pushIprSeries = (key: string, source: any) => {
     if (!source || !Array.isArray(source.curve) || source.curve.length === 0) {
@@ -2233,45 +2263,131 @@ function IPRPlot({
     })
   }
 
+  const pushDemandSeries = (key: string, source: any) => {
+    if (!includeDemand) {
+      return
+    }
+    if (!source || !Array.isArray(source.curve) || source.curve.length === 0) {
+      return
+    }
+    if (demandSeries.some((series) => series.key === key)) {
+      return
+    }
+
+    const style = resolveScenarioStyle(key, scenarioStyles)
+    const qValues = source.curve.map((point: any) => point.caudal)
+    const tdhValues = source.curve.map((point: any) => point.tdh)
+
+    if (!qValues.length || !tdhValues.length) {
+      return
+    }
+
+    const gradient =
+      typeof source?.components?.gradiente === 'number'
+        ? source.components.gradiente
+        : (typeof fallbackDemandSource?.components?.gradiente === 'number'
+            ? fallbackDemandSource.components.gradiente
+            : (typeof pressureDemandCurve?.components?.gradiente === 'number'
+                ? pressureDemandCurve.components.gradiente
+                : 0.0981))
+
+    const tdhBarValues = tdhValues.map((value: number) => value * gradient)
+    const pipValues = source.curve.map((point: any) => point.pip ?? null)
+    const frictionValues = source.curve.map((point: any) => point.perdidas_friccion ?? null)
+
+    demandSeries.push({
+      key,
+      label: style.label,
+      color: style.color,
+      dash: style.dash || 'dot',
+      symbol: style.symbol || 'star',
+      q: qValues,
+      tdh: tdhValues,
+      tdhBar: tdhBarValues,
+      pip: pipValues,
+      friction: frictionValues,
+      gradient,
+      source
+    })
+  }
+
+  const keysToPlot = (activeKeys.length > 0 ? activeKeys : [fallbackKey]).filter(Boolean)
+
   keysToPlot.forEach((key) => {
-    const source = iprSourceMap[key]
-    if (source) {
-      pushIprSeries(key, source)
-    } else if (key === fallbackScenarioKey || key === 'conservative') {
-      pushIprSeries(fallbackScenarioKey, baseIprSource)
+    const iprSource = iprSourceMap[key] || (key === 'conservative' ? baseIprSource : null)
+    if (iprSource) {
+      pushIprSeries(key, iprSource)
+    }
+
+    if (includeDemand) {
+      let demandSource = demandSourceMap[key]
+      if (!demandSource && key === fallbackKey && fallbackDemandSource) {
+        demandSource = fallbackDemandSource
+      }
+      if (!demandSource && key === 'conservative' && fallbackDemandSource) {
+        demandSource = fallbackDemandSource
+      }
+      if (demandSource) {
+        pushDemandSeries(key, demandSource)
+      }
     }
   })
 
-  if (!iprSeries.length) {
-    pushIprSeries(fallbackScenarioKey, baseIprSource)
+  if (!iprSeries.length && baseIprSource) {
+    pushIprSeries('conservative', baseIprSource)
   }
+
+  if (includeDemand && !demandSeries.length && fallbackDemandSource) {
+    pushDemandSeries(fallbackKey, fallbackDemandSource)
+  }
+
+  const primarySeries =
+    iprSeries.find((series) => series.key === (activeScenarioKey || 'conservative')) || iprSeries[0]
+  const primaryKey = primarySeries ? primarySeries.key : null
 
   let maxQ = 0
   let maxPwf = 0
   iprSeries.forEach((series) => {
     if (series.q.length) {
-      maxQ = Math.max(maxQ, ...series.q)
+      maxQ = Math.max(maxQ, ...series.q, maxQ)
     }
     if (series.pwf.length) {
-      maxPwf = Math.max(maxPwf, ...series.pwf)
+      maxPwf = Math.max(maxPwf, ...series.pwf, maxPwf)
     }
   })
 
-  const plotData: any[] = iprSeries.map((series) => ({
-    x: series.q,
-    y: series.pwf,
-    type: 'scatter',
-    mode: 'lines',
-    name: `IPR - ${series.label}`,
-    line: { color: series.color, width: 4, dash: series.dash },
-    customdata: series.nivel,
-    hovertemplate: `<b>${series.label} IPR</b><br>Q: %{x:.2f} m³/d<br>Pwf: %{y:.2f} bar<br>Nivel: %{customdata:.2f} m<extra></extra>`
-  }))
+  let maxDemandTDH_m = 0
+  let maxDemandTDH_bar = 0
+  demandSeries.forEach((series) => {
+    if (series.q.length) {
+      maxQ = Math.max(maxQ, ...series.q, maxQ)
+    }
+    if (series.tdh.length) {
+      maxDemandTDH_m = Math.max(maxDemandTDH_m, ...series.tdh, maxDemandTDH_m)
+    }
+    if (series.tdhBar.length) {
+      maxDemandTDH_bar = Math.max(maxDemandTDH_bar, ...series.tdhBar, maxDemandTDH_bar)
+    }
+  })
 
-  const primarySeries = iprSeries.find((series) => series.key === activeScenarioKey) || iprSeries[0]
+  const plotData: any[] = []
+
+  iprSeries.forEach((series) => {
+    plotData.push({
+      x: series.q,
+      y: series.pwf,
+      type: 'scatter',
+      mode: 'lines',
+      name: `IPR - ${series.label}`,
+      line: { color: series.color, width: 4, dash: series.dash },
+      yaxis: 'y',
+      customdata: series.nivel,
+      hovertemplate: `<b>${series.label} IPR</b><br>Q: %{x:.2f} m³/d<br>Pwf: %{y:.2f} bar<br>Nivel: %{customdata:.2f} m<extra></extra>`
+    })
+  })
+
   const primarySource = primarySeries?.source || baseIprSource
   const qMaxValue = typeof primarySource?.q_max === 'number' ? primarySource.q_max : iprData.q_max
-
   if (typeof qMaxValue === 'number') {
     plotData.push({
       x: [qMaxValue],
@@ -2280,8 +2396,43 @@ function IPRPlot({
       type: 'scatter',
       marker: { color: '#e67e22', size: 14, symbol: 'diamond', line: { color: 'white', width: 2 } },
       name: `Q_max (${primarySeries?.label || iprData.method})`,
+      yaxis: 'y',
       showlegend: true,
       hovertemplate: `<b>Q_max</b><br>Q: ${qMaxValue.toFixed(2)} m³/d<extra></extra>`
+    })
+  }
+
+  if (includeDemand) {
+    demandSeries.forEach((series) => {
+      plotData.push({
+        x: series.q,
+        y: series.tdh,
+        type: 'scatter',
+        mode: 'lines',
+        name: `${series.label} Demand (TDH - m)`,
+        line: { color: series.color, width: 3, dash: series.dash || 'solid' },
+        yaxis: 'y2',
+        customdata: series.q.map((_: number, idx: number) => ({
+          pip: series.pip[idx],
+          friction: series.friction[idx],
+          pressure: series.tdhBar[idx]
+        })),
+        hovertemplate: `<b>${series.label} Demand</b><br>Q: %{x:.2f} m³/d<br>TDH: %{y:.2f} m (%{customdata.pressure:.2f} bar)<br>PIP: %{customdata.pip:.2f} bar<br>Friction: %{customdata.friction:.2f} bar<extra></extra>`
+      })
+
+      if (series.key === primaryKey) {
+        plotData.push({
+          x: series.q,
+          y: series.tdhBar,
+          type: 'scatter',
+          mode: 'lines',
+          name: `${series.label} Demand (bar)`,
+          line: { color: series.color, width: 2, dash: 'dot' },
+          yaxis: 'y3',
+          showlegend: true,
+          hovertemplate: `<b>${series.label} Demand (Pressure)</b><br>Q: %{x:.2f} m³/d<br>Pressure: %{y:.2f} bar<extra></extra>`
+        })
+      }
     })
   }
 
@@ -2289,25 +2440,32 @@ function IPRPlot({
   const gradoApi = iprData.parameters?.grado_api || null
   const aguaPorcentaje = iprData.parameters?.agua_porcentaje || null
 
-  let titleText = `IPR Analysis - ${iprData.method}`
+  const isSensitivityView = Boolean(activeScenarioKey)
+
+  const baseTitle = isSensitivityView ? 'IPR Sensitivity Analysis' : 'IPR Analysis'
+  let titleText = `${baseTitle} - ${iprData.method}`
   if (primarySeries?.label) {
     titleText += ` (${primarySeries.label})`
+  }
+  if (includeDemand && demandSeries.length) {
+    titleText += isSensitivityView ? ' & System Demand Curve Sensitivity' : ' & System Demand Curves'
   }
   if (gradiente && gradoApi !== null && aguaPorcentaje !== null) {
     titleText += `<br><sub>Oil: ${gradoApi}°API | Water: ${aguaPorcentaje}% | Gradient: ${gradiente.toFixed(4)} bar/m</sub>`
   }
 
   const effectiveMaxQ = maxQ > 0 ? maxQ * 1.1 : 1
-  const effectiveMaxPwf = maxPwf > 0 ? maxPwf * 1.1 : 5
+  const effectiveMaxPwf = maxPwf > 0 ? maxPwf * 1.1 : 10
+  const effectiveMaxTDH = maxDemandTDH_m > 0 ? maxDemandTDH_m * 1.1 : 100
+  const effectiveMaxPressure = maxDemandTDH_bar > 0 ? maxDemandTDH_bar * 1.1 : 10
 
-  const layout = {
+  const layout: any = {
     title: {
       text: titleText,
-      font: { size: 24, color: '#2c3e50', family: 'Segoe UI, sans-serif', weight: 700 }
+      font: { size: 18, color: '#2c3e50', family: 'Segoe UI, sans-serif', weight: 600 }
     },
     xaxis: {
-      title: { text: 'Flow Rate (Q - m³/d)', font: { size: 13, color: '#34495e', weight: 600 } },
-      tickfont: { size: 11, color: '#34495e' },
+      title: { text: 'Flow Rate (Q - m³/d)', font: { size: 12, color: '#34495e', weight: 600 } },
       range: [0, effectiveMaxQ],
       showgrid: true,
       gridcolor: '#ecf0f1',
@@ -2316,9 +2474,8 @@ function IPRPlot({
       zerolinewidth: 2
     },
     yaxis: {
-      title: { text: 'Bottom-Hole Flowing Pressure (Pwf - bar)', font: { size: 13, color: '#16a085', weight: 600 } },
-      tickfont: { size: 11, color: '#16a085' },
-      range: [0, Math.max(effectiveMaxPwf, 5)],
+      title: { text: 'IPR Pressure (Pwf - bar)', font: { size: 12, color: '#16a085', weight: 600 } },
+      range: [0, effectiveMaxPwf],
       showgrid: true,
       gridcolor: '#ecf0f1',
       zeroline: true,
@@ -2328,19 +2485,43 @@ function IPRPlot({
     },
     legend: {
       orientation: 'h',
-      yanchor: 'top',
-      y: -0.32,
+      yanchor: 'bottom',
+      y: 1.16,
       xanchor: 'center',
       x: 0.5,
       bgcolor: 'rgba(255, 255, 255, 0.85)',
       bordercolor: '#95a5a6',
       borderwidth: 1,
-  font: { size: 9, weight: 600 }
+      font: { size: 9, weight: 600 }
     },
     plot_bgcolor: '#fafafa',
     paper_bgcolor: 'white',
     hovermode: 'closest',
-  margin: { l: 80, r: 160, t: 160, b: 220 }
+    margin: includeDemand && demandSeries.length > 0
+      ? { l: 80, r: 200, t: 170, b: 90 }
+      : { l: 80, r: 80, t: 150, b: 90 }
+  }
+
+  if (includeDemand && demandSeries.length > 0) {
+    layout.yaxis2 = {
+      title: { text: 'System Demand (TDH - m)', font: { size: 12, color: '#e74c3c', weight: 600 } },
+      overlaying: 'y',
+      side: 'right',
+      showgrid: false,
+      zeroline: false,
+      range: [0, Math.max(effectiveMaxTDH, 100)],
+      position: 0.93
+    }
+    layout.yaxis3 = {
+      title: { text: 'System Demand (bar)', font: { size: 11, color: '#c0392b', weight: 600 } },
+      overlaying: 'y',
+      side: 'right',
+      anchor: 'free',
+      position: 1.0,
+      showgrid: false,
+      zeroline: false,
+      range: [0, Math.max(effectiveMaxPressure, 10)]
+    }
   }
 
   const config = {
@@ -2350,7 +2531,9 @@ function IPRPlot({
     modeBarButtonsToRemove: ['lasso2d', 'select2d'],
     toImageButtonOptions: {
       format: 'png',
-      filename: 'ipr_analysis',
+      filename: includeDemand && demandSeries.length > 0
+        ? 'ipr_pressure_demand_analysis'
+        : 'ipr_analysis',
       height: 800,
       width: 1200,
       scale: 2
@@ -2391,7 +2574,7 @@ function DemandPlot({
 
   if (!hasBase && !hasScenario) {
     return (
-      <div style={{ textAlign: 'center', padding: '32px', color: '#7f8c8d', fontSize: '1.1rem' }}>
+      <div style={{ textAlign: 'center', padding: '32px', color: '#7f8c8d', fontSize: '0.95rem' }}>
         📊 Run the IPR calculation to obtain the system demand curve
       </div>
     )
@@ -2467,7 +2650,7 @@ function DemandPlot({
 
   if (!demandSeries.length) {
     return (
-      <div style={{ textAlign: 'center', padding: '32px', color: '#7f8c8d', fontSize: '1.1rem' }}>
+      <div style={{ textAlign: 'center', padding: '32px', color: '#7f8c8d', fontSize: '0.95rem' }}>
         ⚠️ No demand scenarios are available for the current configuration
       </div>
     )
@@ -2514,7 +2697,11 @@ function DemandPlot({
 
   const primaryGradient = typeof primarySeries?.gradient === 'number' ? primarySeries.gradient : null
 
-  let titleText = 'System Demand Curves'
+  const componentsSource = primarySeries?.source || fallbackBase
+
+  const isSensitivityView = Boolean(activeScenarioKey)
+
+  let titleText = isSensitivityView ? 'System Demand Curve Sensitivity' : 'System Demand Curves'
   if (primarySeries?.label) {
     titleText += ` (${primarySeries.label})`
   }
@@ -2529,10 +2716,10 @@ function DemandPlot({
   const layout = {
     title: {
       text: titleText,
-      font: { size: 24, color: '#2c3e50', family: 'Segoe UI, sans-serif', weight: 700 }
+      font: { size: 18, color: '#2c3e50', family: 'Segoe UI, sans-serif', weight: 600 }
     },
     xaxis: {
-      title: { text: 'Flow Rate (Q - m³/d)', font: { size: 16, color: '#34495e', weight: 600 } },
+      title: { text: 'Flow Rate (Q - m³/d)', font: { size: 12, color: '#34495e', weight: 600 } },
       range: [0, effectiveMaxQ],
       showgrid: true,
       gridcolor: '#ecf0f1',
@@ -2541,7 +2728,7 @@ function DemandPlot({
       zerolinewidth: 2
     },
     yaxis: {
-      title: { text: 'Total Dynamic Head (m)', font: { size: 16, color: '#e74c3c', weight: 600 } },
+      title: { text: 'Total Dynamic Head (m)', font: { size: 12, color: '#e74c3c', weight: 600 } },
       range: [0, Math.max(effectiveMaxTDH, 50)],
       showgrid: true,
       gridcolor: '#ecf0f1',
@@ -2551,7 +2738,7 @@ function DemandPlot({
       side: 'left'
     },
     yaxis2: {
-      title: { text: 'Equivalent Pressure (bar)', font: { size: 14, color: '#c0392b', weight: 600 } },
+      title: { text: 'Equivalent Pressure (bar)', font: { size: 11, color: '#c0392b', weight: 600 } },
       overlaying: 'y',
       side: 'right',
       showgrid: false,
@@ -2568,12 +2755,12 @@ function DemandPlot({
       bgcolor: 'rgba(255, 255, 255, 0.85)',
       bordercolor: '#95a5a6',
       borderwidth: 1,
-  font: { size: 9, weight: 600 }
+      font: { size: 8, weight: 600 }
     },
     plot_bgcolor: '#fafafa',
     paper_bgcolor: 'white',
     hovermode: 'closest',
-  margin: { l: 80, r: 200, t: 170, b: 220 }
+    margin: { l: 80, r: 200, t: 170, b: 220 }
   }
 
   const config = {

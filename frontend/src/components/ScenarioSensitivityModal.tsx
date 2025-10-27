@@ -330,8 +330,8 @@ export default function ScenarioSensitivityModal({
           onPointerDown={handlePointerDown}
         >
           <div>
-            <h2 style={{ margin: 0, fontSize: '1.35rem', color: '#9fc3ff' }}>Adjust Scenario</h2>
-            <p style={{ margin: '6px 0 0 0', color: '#8ca1d4', fontSize: '0.9rem' }}>{currentLabel}</p>
+            <h2 style={{ margin: 0, fontSize: '1.1rem', color: '#9fc3ff' }}>Adjust Scenario</h2>
+            <p style={{ margin: '6px 0 0 0', color: '#8ca1d4', fontSize: '0.75rem' }}>{currentLabel}</p>
           </div>
           <button
             type="button"
@@ -341,7 +341,7 @@ export default function ScenarioSensitivityModal({
               background: 'transparent',
               border: 'none',
               color: '#8ca1d4',
-              fontSize: '1.4rem',
+              fontSize: '1rem',
               cursor: 'pointer',
               lineHeight: 1
             }}
@@ -352,8 +352,8 @@ export default function ScenarioSensitivityModal({
         </header>
 
   <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingTop: '4px' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <span style={{ fontWeight: 600, color: '#d3e1ff' }}>Frequency (Hz)</span>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span style={{ fontWeight: 600, color: '#d3e1ff', fontSize: '0.8rem' }}>Frequency (Hz)</span>
             <input
               type="number"
               value={freq}
@@ -362,17 +362,18 @@ export default function ScenarioSensitivityModal({
               max={70}
               step={0.5}
               style={{
-                padding: '10px 12px',
+                padding: '8px 10px',
                 borderRadius: '8px',
                 border: '1px solid rgba(118, 147, 234, 0.6)',
                 background: '#0b1426',
                 color: '#e2eaff',
-                fontWeight: 600
+                fontWeight: 600,
+                fontSize: '0.85rem'
               }}
             />
           </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <span style={{ fontWeight: 600, color: '#d3e1ff' }}>Q Test (m³/d)</span>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span style={{ fontWeight: 600, color: '#d3e1ff', fontSize: '0.8rem' }}>Q Test (m³/d)</span>
             <input
               type="number"
               value={qTest}
@@ -380,17 +381,18 @@ export default function ScenarioSensitivityModal({
               min={0}
               step={5}
               style={{
-                padding: '10px 12px',
+                padding: '8px 10px',
                 borderRadius: '8px',
                 border: '1px solid rgba(118, 147, 234, 0.6)',
                 background: '#0b1426',
                 color: '#e2eaff',
-                fontWeight: 600
+                fontWeight: 600,
+                fontSize: '0.85rem'
               }}
             />
           </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <span style={{ fontWeight: 600, color: '#d3e1ff' }}>Pwf Test (bar)</span>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span style={{ fontWeight: 600, color: '#d3e1ff', fontSize: '0.8rem' }}>Pwf Test (bar)</span>
             <input
               type="number"
               value={pwfTest}
@@ -398,12 +400,13 @@ export default function ScenarioSensitivityModal({
               min={0}
               step={1}
               style={{
-                padding: '10px 12px',
+                padding: '8px 10px',
                 borderRadius: '8px',
                 border: '1px solid rgba(118, 147, 234, 0.6)',
                 background: '#0b1426',
                 color: '#e2eaff',
-                fontWeight: 600
+                fontWeight: 600,
+                fontSize: '0.85rem'
               }}
             />
           </label>
@@ -415,12 +418,13 @@ export default function ScenarioSensitivityModal({
             onClick={handleCancel}
             onPointerDown={(event) => event.stopPropagation()}
             style={{
-              padding: '10px 18px',
+              padding: '8px 16px',
               borderRadius: '8px',
               border: '1px solid rgba(132, 149, 198, 0.5)',
               background: 'rgba(16, 28, 50, 0.6)',
               color: '#a8bdf0',
               fontWeight: 600,
+              fontSize: '0.85rem',
               cursor: 'pointer'
             }}
           >
@@ -431,12 +435,13 @@ export default function ScenarioSensitivityModal({
             onClick={onClose}
             onPointerDown={(event) => event.stopPropagation()}
             style={{
-              padding: '10px 18px',
+              padding: '8px 16px',
               borderRadius: '8px',
               border: '1px solid rgba(118, 147, 234, 0.9)',
               background: 'linear-gradient(135deg, #3a4bc8 0%, #8559f6 100%)',
               color: '#f5f7ff',
               fontWeight: 700,
+              fontSize: '0.9rem',
               cursor: 'pointer',
               boxShadow: '0 12px 28px rgba(47, 75, 177, 0.4)'
             }}

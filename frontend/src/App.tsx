@@ -764,9 +764,9 @@ export default function App() {
         ?? displayValues?.freq
         ?? freq
 
-      const headValue = Number.isFinite(pumpHeadAtFlow)
-        ? Number(pumpHeadAtFlow)
-        : (Number.isFinite(demandHeadAtFlow) ? Number(demandHeadAtFlow) : (intersection?.head ?? null))
+      const headValue = Number.isFinite(demandHeadAtFlow)
+        ? Number(demandHeadAtFlow)
+        : (Number.isFinite(pumpHeadAtFlow) ? Number(pumpHeadAtFlow) : (intersection?.head ?? null))
 
       const pwfDisplay = typeof pwfValue === 'number' && Number.isFinite(pwfValue)
         ? pwfValue
@@ -1118,8 +1118,11 @@ export default function App() {
         q_max_estimate: 500
       }
 
-      const overridesPayload = serializeOverrides(scenarioOverridesForIpr)
-      if (Object.keys(overridesPayload).length > 0) {
+      const overridesPayload = sensitivityEnabled
+        ? serializeOverrides(scenarioOverridesForIpr)
+        : {}
+
+      if (sensitivityEnabled && Object.keys(overridesPayload).length > 0) {
         wellData.sensitivity_overrides = overridesPayload
       }
 

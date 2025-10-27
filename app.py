@@ -24,26 +24,17 @@ SCENARIO_ORDER = ['optimistic', 'conservative', 'pessimistic']
 SCENARIO_CONFIG = {
     'optimistic': {
         'label': 'Optimistic',
-        'description': 'Higher productivity (+15% Q) and slightly lower surface backpressure (-10%).',
-        'ipr_scale': 1.15,
-        'surface_pressure_multiplier': 0.9,
-        'roughness_multiplier': 0.9,
+        'description': 'Same base inputs; adjust manually via scenario overrides if desired.',
         'color': '#2ecc71'
     },
     'conservative': {
         'label': 'Conservative',
         'description': 'Base case using nominal reservoir and installation inputs.',
-        'ipr_scale': 1.0,
-        'surface_pressure_multiplier': 1.0,
-        'roughness_multiplier': 1.0,
         'color': '#3498db'
     },
     'pessimistic': {
         'label': 'Pessimistic',
-        'description': 'Lower productivity (-15% Q) with increased backpressure (+10%) and roughness (+10%).',
-        'ipr_scale': 0.85,
-        'surface_pressure_multiplier': 1.1,
-        'roughness_multiplier': 1.1,
+        'description': 'Same base inputs; adjust manually via scenario overrides if desired.',
         'color': '#e74c3c'
     }
 }
@@ -80,16 +71,19 @@ def calculate_conditions():
             return target
 
         # 1. Calcular IPR (Aporte del pozo)
-        base_well_data = apply_override(dict(well_data), sensitivity_overrides.get('conservative', {}))
+        base_well_data = deepcopy(well_data)
 
-        ipr_result = well_performance.calculate_ipr(base_well_data)
+        ipr_base = well_performance.calculate_ipr(deepcopy(base_well_data))
         
         # 2. Calcular TDH (Carga Dinámica Total)
-        system_head_curve = hydraulic_calculations.calculate_system_head_curve(base_well_data)
+        system_head_curve = hydraulic_calculations.calculate_system_head_curve(deepcopy(base_well_data))
 
         # 3. Calcular curva de demanda de presión (Presión vs Caudal)
         # Pasamos el IPR para usar la presión de intake real en cada caudal
-        pressure_demand_curve = hydraulic_calculations.calculate_pressure_demand_curve(base_well_data, ipr_result)
+        pressure_demand_curve = hydraulic_calculations.calculate_pressure_demand_curve(
+            deepcopy(base_well_data),
+            ipr_base
+        )
         
         # DEBUG: Imprimir primeros 3 puntos de la curva de demanda
         print("\n" + "="*80)
@@ -104,21 +98,16 @@ def calculate_conditions():
         ipr_scenarios = {}
         pressure_demand_scenarios = {}
 
-        if ipr_result:
-            base_roughness = well_data.get('tubing_roughness_mm', 0.046)
-
+        if ipr_base:
             for key in SCENARIO_ORDER:
                 config = SCENARIO_CONFIG.get(key, {})
                 scenario_definitions[key] = {
                     'label': config.get('label', key.title()),
                     'description': config.get('description'),
-                    'ipr_scale': config.get('ipr_scale', 1.0),
-                    'surface_pressure_multiplier': config.get('surface_pressure_multiplier', 1.0),
-                    'roughness_multiplier': config.get('roughness_multiplier', 1.0),
                     'color': config.get('color')
                 }
 
-                override_data = sensitivity_overrides.get(key, {})
+                override_data = sensitivity_overrides.get(key, {}) or {}
 
                 if override_data:
                     scenario_definitions[key]['overrides'] = {
@@ -126,34 +115,21 @@ def calculate_conditions():
                         for k in ('q_test', 'pwf_test', 'frequency_hz')
                         if override_data.get(k) is not None
                     }
-
-                if key == 'conservative':
-                    ipr_scenarios[key] = deepcopy(ipr_result)
-                    pressure_demand_scenarios[key] = deepcopy(pressure_demand_curve)
-                    continue
-
-                scenario_well_data = apply_override(dict(well_data), override_data)
-                surface_multiplier = config.get('surface_pressure_multiplier', 1.0)
-                roughness_multiplier = config.get('roughness_multiplier', 1.0)
-
-                scenario_well_data['presion_superficie'] = scenario_well_data.get('presion_superficie', 10) * surface_multiplier
-                scenario_well_data['tubing_roughness_mm'] = base_roughness * roughness_multiplier
-
-                scenario_ipr = well_performance.calculate_ipr(scenario_well_data)
-                scenario_scale = config.get('ipr_scale', 1.0)
-                if scenario_scale and scenario_scale != 1.0:
-                    scaled = well_performance.scale_ipr_curve(
-                        scenario_ipr,
-                        scenario_scale,
-                        scenario_key=key
-                    )
-                    if scaled:
-                        scenario_ipr = scaled
-
-                scenario_pressure_demand = hydraulic_calculations.calculate_pressure_demand_curve(
-                    scenario_well_data,
-                    scenario_ipr
+                has_ipr_override = any(
+                    override_data.get(field) is not None for field in ('q_test', 'pwf_test')
                 )
+
+                if has_ipr_override:
+                    scenario_input = deepcopy(well_data)
+                    apply_override(scenario_input, override_data)
+                    scenario_ipr = well_performance.calculate_ipr(deepcopy(scenario_input))
+                    scenario_pressure_demand = hydraulic_calculations.calculate_pressure_demand_curve(
+                        deepcopy(scenario_input),
+                        scenario_ipr
+                    )
+                else:
+                    scenario_ipr = deepcopy(ipr_base)
+                    scenario_pressure_demand = deepcopy(pressure_demand_curve)
 
                 ipr_scenarios[key] = scenario_ipr
                 pressure_demand_scenarios[key] = scenario_pressure_demand
@@ -163,7 +139,7 @@ def calculate_conditions():
 
         return jsonify({
             "success": True,
-            "ipr_data": ipr_result,
+            "ipr_data": ipr_base,
             "system_head_curve": system_head_curve,
             "pressure_demand_curve": pressure_demand_curve,
             "gas_corrections": gas_corrections,
