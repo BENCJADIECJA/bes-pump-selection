@@ -3,8 +3,10 @@ import React, { useEffect, useRef, useState } from 'react'
 
 type ScenarioValues = {
   freq: number
-  qTest: number
-  pwfTest: number
+  qTest?: number
+  pwfTest?: number
+  lockFlow?: boolean
+  lockPwf?: boolean
 }
 
 type ScenarioSensitivityModalProps = {
@@ -28,7 +30,13 @@ const scenariosEqual = (a: ScenarioValues | null, b: ScenarioValues | null) => {
   if (!a || !b) {
     return false
   }
-  return a.freq === b.freq && a.qTest === b.qTest && a.pwfTest === b.pwfTest
+  return (
+    a.freq === b.freq &&
+    a.qTest === b.qTest &&
+    a.pwfTest === b.pwfTest &&
+    Boolean(a.lockFlow) === Boolean(b.lockFlow) &&
+    Boolean(a.lockPwf) === Boolean(b.lockPwf)
+  )
 }
 
 const parseEditableNumber = (value: string | number | null | undefined): number | null => {
@@ -180,6 +188,8 @@ export default function ScenarioSensitivityModal({
   const [freq, setFreq] = useState(() => String(values?.freq ?? 50))
   const [qTest, setQTest] = useState(() => String(values?.qTest ?? 0))
   const [pwfTest, setPwfTest] = useState(() => String(values?.pwfTest ?? 0))
+  const [lockFlow, setLockFlow] = useState(() => Boolean(values?.lockFlow))
+  const [lockPwf, setLockPwf] = useState(() => Boolean(values?.lockPwf))
   const [position, setPosition] = useState(() => computeDefaultPosition())
   const [isDragging, setIsDragging] = useState(false)
 
@@ -199,14 +209,24 @@ export default function ScenarioSensitivityModal({
     const qNumber = parseEditableNumber(qTest)
     const pwfNumber = parseEditableNumber(pwfTest)
 
-    if (freqNumber === null || qNumber === null || pwfNumber === null) {
+    if (freqNumber === null) {
+      return null
+    }
+
+    if (lockFlow && qNumber === null) {
+      return null
+    }
+
+    if (lockPwf && pwfNumber === null) {
       return null
     }
 
     return {
       freq: freqNumber,
-      qTest: qNumber,
-      pwfTest: pwfNumber
+      qTest: qNumber === null ? undefined : qNumber,
+      pwfTest: pwfNumber === null ? undefined : pwfNumber,
+      lockFlow,
+      lockPwf
     }
   }
 
@@ -230,25 +250,31 @@ export default function ScenarioSensitivityModal({
 
   useEffect(() => {
     if (open && scenarioKey) {
-      const initial = {
+      const initial: ScenarioValues = {
         freq: parseNumber(values?.freq, 50),
         qTest: parseNumber(values?.qTest, 0),
-        pwfTest: parseNumber(values?.pwfTest, 0)
+        pwfTest: parseNumber(values?.pwfTest, 0),
+        lockFlow: Boolean(values?.lockFlow),
+        lockPwf: Boolean(values?.lockPwf)
       }
 
       initialValuesRef.current = initial
       lastAppliedRef.current = initial
 
-      setFreq(String(initial.freq))
-      setQTest(String(initial.qTest))
-      setPwfTest(String(initial.pwfTest))
+  setFreq(String(initial.freq))
+  setQTest(initial.qTest !== undefined ? String(initial.qTest) : '')
+  setPwfTest(initial.pwfTest !== undefined ? String(initial.pwfTest) : '')
+      setLockFlow(Boolean(initial.lockFlow))
+      setLockPwf(Boolean(initial.lockPwf))
     }
-  }, [open, scenarioKey])
+  }, [open, scenarioKey, values])
 
   useEffect(() => {
     if (!open) {
       initialValuesRef.current = null
       lastAppliedRef.current = null
+      setLockFlow(false)
+      setLockPwf(false)
     }
   }, [open])
 
@@ -355,7 +381,7 @@ export default function ScenarioSensitivityModal({
     }, AUTO_SAVE_DELAY_MS)
 
     return () => window.clearTimeout(handle)
-  }, [freq, qTest, pwfTest, open, scenarioKey, onSave])
+  }, [freq, qTest, pwfTest, lockFlow, lockPwf, open, scenarioKey, onSave])
 
   if (!open || !scenarioKey) {
     return null
@@ -379,9 +405,11 @@ export default function ScenarioSensitivityModal({
   const handleCancel = () => {
     const initial = initialValuesRef.current
     if (initial && scenarioKey) {
-      setFreq(String(initial.freq))
-      setQTest(String(initial.qTest))
-      setPwfTest(String(initial.pwfTest))
+  setFreq(String(initial.freq))
+  setQTest(initial.qTest !== undefined ? String(initial.qTest) : '')
+  setPwfTest(initial.pwfTest !== undefined ? String(initial.pwfTest) : '')
+      setLockFlow(Boolean(initial.lockFlow))
+      setLockPwf(Boolean(initial.lockPwf))
       if (!scenariosEqual(initial, lastAppliedRef.current)) {
         lastAppliedRef.current = initial
         onSave(scenarioKey, initial)
@@ -442,7 +470,11 @@ export default function ScenarioSensitivityModal({
             <input
               type="number"
               value={qTest}
-              onChange={(event) => setQTest(event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value
+                setQTest(next)
+                setLockFlow(next.trim().length > 0)
+              }}
               min={0}
               step={5}
               style={inputStyle}
@@ -453,7 +485,11 @@ export default function ScenarioSensitivityModal({
             <input
               type="number"
               value={pwfTest}
-              onChange={(event) => setPwfTest(event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value
+                setPwfTest(next)
+                setLockPwf(next.trim().length > 0)
+              }}
               min={0}
               step={1}
               style={inputStyle}

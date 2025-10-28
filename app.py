@@ -15,6 +15,8 @@ import gas_effects
 import equipment_selection
 import engineering_validation
 import tubing_catalog
+import pump_coefficients
+from pump_coefficients import PumpCoefficientError, PumpCoefficientValidationError
 
 app = Flask(__name__)
 # Configuramos CORS para permitir peticiones desde nuestro front-end
@@ -329,6 +331,56 @@ def get_tubing_catalog():
         }), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/pump_coefficients', methods=['GET'])
+def list_pump_coefficients():
+    try:
+        result = pump_coefficients.list_pump_coefficients()
+        return jsonify(result), 200
+    except PumpCoefficientError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route('/api/pump_coefficients', methods=['POST'])
+def create_pump_coefficient():
+    try:
+        payload = request.json or {}
+        row = pump_coefficients.create_pump(payload)
+        return jsonify({"success": True, "row": row}), 201
+    except PumpCoefficientValidationError as exc:
+        return jsonify({"success": False, "error": str(exc), "details": exc.errors}), 422
+    except PumpCoefficientError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route('/api/pump_coefficients/<pump_id>', methods=['PUT'])
+def update_pump_coefficient(pump_id):
+    try:
+        payload = request.json or {}
+        row = pump_coefficients.update_pump(pump_id, payload)
+        return jsonify({"success": True, "row": row}), 200
+    except PumpCoefficientValidationError as exc:
+        return jsonify({"success": False, "error": str(exc), "details": exc.errors}), 422
+    except PumpCoefficientError as exc:
+        status = 404 if 'No se encontró' in str(exc) else 400
+        return jsonify({"success": False, "error": str(exc)}), status
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route('/api/pump_coefficients/<pump_id>', methods=['DELETE'])
+def delete_pump_coefficient(pump_id):
+    try:
+        pump_coefficients.delete_pump(pump_id)
+        return jsonify({"success": True}), 200
+    except PumpCoefficientError as exc:
+        status = 404 if 'No se encontró' in str(exc) else 400
+        return jsonify({"success": False, "error": str(exc)}), status
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 if __name__ == '__main__':

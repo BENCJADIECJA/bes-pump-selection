@@ -8,6 +8,7 @@ import CurvePlot from './components/CurvePlot'
 import IPRControls from './components/IPRControls'
 import InstallationControls from './components/InstallationControls'
 import ScenarioSensitivityModal from './components/ScenarioSensitivityModal'
+import PumpManagerModal from './components/PumpManagerModal'
 
 const DEFAULT_SCENARIO_ORDER = ['optimistic', 'conservative', 'pessimistic']
 const DEFAULT_SCENARIO_STYLES = {
@@ -27,6 +28,8 @@ type ScenarioDisplayValues = {
   freq: number
   qTest: number
   pwfTest: number
+  lockFlow?: boolean
+  lockPwf?: boolean
 }
 
 const interpolateValue = (qArray: number[], valueArray: number[], targetQ: number) => {
@@ -86,6 +89,9 @@ const findPumpDemandIntersection = (pumpQ: number[], pumpHead: number[], demandQ
   return null
 }
 
+const toFiniteNumber = (value: any) =>
+  typeof value === 'number' && Number.isFinite(value) ? Number(value) : null
+
 type DesignPump = { id: string | null; stages: number }
 
 export default function App() {
@@ -116,7 +122,10 @@ export default function App() {
     { id: null, stages: 300 }
   ])
   const prevSelectedRef = useRef<string | null>(null)
+  const selectedRef = useRef<string | null>(null)
   const [individualCurves, setIndividualCurves] = useState<any[]>([])
+
+  const [isPumpManagerOpen, setPumpManagerOpen] = useState(false)
   
   // Estado para controlar pestañas
   const [configTab, setConfigTab] = useState<'pump' | 'installation' | 'ipr'>('pump')
@@ -312,10 +321,25 @@ export default function App() {
         return next
       }
 
-      next[scenarioKey] = {
-        freq: Number.isFinite(values.freq) ? values.freq : undefined,
-        qTest: Number.isFinite(values.qTest) ? values.qTest : undefined,
-        pwfTest: Number.isFinite(values.pwfTest) ? values.pwfTest : undefined
+      const entry: ScenarioOverride = {}
+
+      if (Number.isFinite(values.freq)) {
+        entry.freq = values.freq
+      }
+
+      if (values.lockFlow && Number.isFinite(values.qTest)) {
+        entry.qTest = values.qTest
+      }
+
+      if (values.lockPwf && Number.isFinite(values.pwfTest)) {
+        entry.pwfTest = values.pwfTest
+      }
+
+      if (Object.keys(entry).length > 0) {
+        next[scenarioKey] = entry
+      } else {
+        delete next[scenarioKey]
+        return next
       }
 
       const current = next[scenarioKey]
@@ -466,12 +490,18 @@ export default function App() {
         freqValue = freq
       }
 
-      let qValue = override.qTest
+      const hasOverrideFlow = typeof override.qTest === 'number' && Number.isFinite(override.qTest)
+      const hasDefinitionFlow = typeof definitionOverride.q_test === 'number' && Number.isFinite(definitionOverride.q_test)
+
+      let qValue = hasOverrideFlow ? override.qTest : undefined
       if (qValue === undefined && typeof definitionOverride.q_test === 'number') {
         qValue = definitionOverride.q_test
       }
 
-      let pwfValue = override.pwfTest
+      const hasOverridePwf = typeof override.pwfTest === 'number' && Number.isFinite(override.pwfTest)
+      const hasDefinitionPwf = typeof definitionOverride.pwf_test === 'number' && Number.isFinite(definitionOverride.pwf_test)
+
+      let pwfValue = hasOverridePwf ? override.pwfTest : undefined
       if (pwfValue === undefined && typeof definitionOverride.pwf_test === 'number') {
         pwfValue = definitionOverride.pwf_test
       }
@@ -514,7 +544,9 @@ export default function App() {
       result[key] = {
         freq: typeof freqValue === 'number' && Number.isFinite(freqValue) ? freqValue : freq,
         qTest: typeof qValue === 'number' && Number.isFinite(qValue) ? qValue : qTest,
-        pwfTest: typeof pwfValue === 'number' && Number.isFinite(pwfValue) ? pwfValue : pwfTest
+        pwfTest: typeof pwfValue === 'number' && Number.isFinite(pwfValue) ? pwfValue : pwfTest,
+        lockFlow: hasOverrideFlow || hasDefinitionFlow,
+        lockPwf: hasOverridePwf || hasDefinitionPwf
       }
     })
 
@@ -673,16 +705,29 @@ export default function App() {
       const intersection = findPumpDemandIntersection(pumpQ, pumpHead, demandQ, demandHead)
 
       const displayValues = scenarioDisplayValues?.[scenarioKey]
-      const targetFlowOverride = displayValues?.qTest
-      const targetPwfOverride = displayValues?.pwfTest
+      const manualFlow = toFiniteNumber(displayValues?.qTest)
+      const manualPwf = toFiniteNumber(displayValues?.pwfTest)
+      const flowLocked = Boolean(displayValues?.lockFlow)
+      const pwfLocked = Boolean(displayValues?.lockPwf)
 
-      const targetFlow = Number.isFinite(targetFlowOverride)
-        ? Number(targetFlowOverride)
-        : (intersection && Number.isFinite(intersection.q) ? Number(intersection.q) : null)
+      const intersectionFlow = toFiniteNumber(intersection?.q)
+      const intersectionHeadCandidate = toFiniteNumber(intersection?.head)
 
-      if (!Number.isFinite(targetFlow)) {
+      let targetFlow: number | null = null
+      if (flowLocked && manualFlow !== null) {
+        targetFlow = manualFlow
+      } else if (intersectionFlow !== null) {
+        targetFlow = intersectionFlow
+      } else {
+        targetFlow = manualFlow
+      }
+
+      if (targetFlow === null) {
         return
       }
+
+  const hydraulicFlow = intersectionFlow ?? targetFlow
+  const flowForPumpCurves = hydraulicFlow ?? targetFlow
 
       const mapSeries = (series: any[], multiplier = 1) => {
         if (!Array.isArray(series)) {
@@ -706,9 +751,9 @@ export default function App() {
             )
           : null
 
-      const pumpHeadAtFlow = interpolateValue(pumpQ, pumpHead, targetFlow)
-      const efficiency = interpolateFromSeries(efficiencySeries, targetFlow)
-      const bhp = interpolateFromSeries(bhpSeries, targetFlow)
+  const pumpHeadAtFlow = toFiniteNumber(interpolateValue(pumpQ, pumpHead, flowForPumpCurves))
+  const efficiency = interpolateFromSeries(efficiencySeries, flowForPumpCurves)
+  const bhp = interpolateFromSeries(bhpSeries, flowForPumpCurves)
 
       const extractDemandSeries = (key: string) => {
         const filtered = demandSource.curve
@@ -722,15 +767,30 @@ export default function App() {
       const nivelSeries = extractDemandSeries('nivel')
       const frictionSeries = extractDemandSeries('perdidas_friccion')
 
-      const demandHeadAtFlow = interpolateValue(demandQ, demandHead, targetFlow)
-      const pip = interpolateFromSeries(pipSeries, targetFlow)
-      const pwfFromDemand = interpolateFromSeries(pwfSeries, targetFlow)
-      const nivel = interpolateFromSeries(nivelSeries, targetFlow)
-      const friction = interpolateFromSeries(frictionSeries, targetFlow)
+      const demandHeadAtFlow = toFiniteNumber(interpolateValue(demandQ, demandHead, hydraulicFlow))
+      const pip = interpolateFromSeries(pipSeries, hydraulicFlow)
+      const pwfFromDemand = interpolateFromSeries(pwfSeries, hydraulicFlow)
+      const nivel = interpolateFromSeries(nivelSeries, hydraulicFlow)
+      const friction = interpolateFromSeries(frictionSeries, hydraulicFlow)
 
-      const pwfValue = Number.isFinite(targetPwfOverride)
-        ? Number(targetPwfOverride)
-        : (Number.isFinite(pwfFromDemand) ? Number(pwfFromDemand) : null)
+      const pwfValue = pwfLocked && manualPwf !== null
+        ? manualPwf
+        : toFiniteNumber(pwfFromDemand)
+
+      const demandHeadAtIntersection = intersectionFlow !== null
+        ? toFiniteNumber(interpolateValue(demandQ, demandHead, intersectionFlow))
+        : null
+      const pumpHeadAtIntersection = intersectionFlow !== null
+        ? toFiniteNumber(interpolateValue(pumpQ, pumpHead, intersectionFlow))
+        : null
+      const intersectionHeadValue =
+        intersectionHeadCandidate
+        ?? demandHeadAtIntersection
+        ?? pumpHeadAtIntersection
+
+      const intersectionPwf = intersectionFlow !== null
+        ? toFiniteNumber(interpolateFromSeries(pwfSeries, intersectionFlow))
+        : null
 
       const components = demandSource.components || {}
       const gradient = typeof components.gradiente === 'number'
@@ -765,9 +825,9 @@ export default function App() {
         ?? displayValues?.freq
         ?? freq
 
-      const headValue = Number.isFinite(demandHeadAtFlow)
-        ? Number(demandHeadAtFlow)
-        : (Number.isFinite(pumpHeadAtFlow) ? Number(pumpHeadAtFlow) : (intersection?.head ?? null))
+      const headValue = demandHeadAtFlow !== null
+        ? demandHeadAtFlow
+        : (pumpHeadAtFlow !== null ? pumpHeadAtFlow : intersectionHeadValue)
 
       const pwfDisplay = typeof pwfValue === 'number' && Number.isFinite(pwfValue)
         ? pwfValue
@@ -785,7 +845,10 @@ export default function App() {
         friction,
         submergence,
         fluidLevel,
-        frequency
+        frequency,
+        intersectionFlow,
+        intersectionHead: intersectionHeadValue,
+        intersectionPwf
       })
     })
 
@@ -832,19 +895,64 @@ export default function App() {
   }
 
   useEffect(() => {
-    axios.get('/api/pumps').then(r => {
-      const list = r.data || []
-      // Expect list of pump records; map to ids
-      const pumpIds = list.map((p: any) => p[equipmentIdKey(list)])
+    selectedRef.current = selected
+  }, [selected])
+
+  const loadPumpCatalog = React.useCallback(async (options?: { preserveSelection?: boolean }) => {
+    try {
+      const response = await axios.get('/api/pumps')
+      const list = Array.isArray(response.data) ? response.data : []
+
+      if (list.length === 0) {
+        setPumps([])
+        if (!options?.preserveSelection) {
+          setSelected(null)
+        }
+        return
+      }
+
+      const idKey = equipmentIdKey(list)
+      const pumpIds = list
+        .map((item: any) => item?.[idKey])
+        .filter((value: any) => typeof value === 'string' && value.trim().length > 0)
+
       setPumps(pumpIds)
 
-      if (!selected) {
-        const defaultPump = pumpIds.find((pumpId: string) => pumpId === 'NHV760') || pumpIds[0] || null
-        if (defaultPump) {
-          setSelected(defaultPump)
-        }
+      const currentSelected = selectedRef.current
+      const shouldPreserve = Boolean(options?.preserveSelection)
+
+      if (shouldPreserve && currentSelected && pumpIds.includes(currentSelected)) {
+        return
       }
-    }).catch(e => console.error(e))
+
+      if (shouldPreserve && currentSelected && !pumpIds.includes(currentSelected)) {
+        const fallback = pumpIds[0] || null
+        setSelected(fallback || null)
+        return
+      }
+
+      if (currentSelected && pumpIds.includes(currentSelected)) {
+        return
+      }
+
+      const defaultPump = pumpIds.find((pumpId: string) => pumpId === 'NHV760') || pumpIds[0] || null
+      setSelected(defaultPump || null)
+    } catch (catalogError) {
+      console.error(catalogError)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadPumpCatalog()
+  }, [loadPumpCatalog])
+
+  const handlePumpCatalogChanged = React.useCallback(async () => {
+    await loadPumpCatalog({ preserveSelection: true })
+  }, [loadPumpCatalog])
+
+  const handlePumpSelectedFromManager = React.useCallback((pumpId: string) => {
+    setSelected(pumpId)
+    setPumpManagerOpen(false)
   }, [])
 
   useEffect(() => {
@@ -887,10 +995,19 @@ export default function App() {
     if (!list || list.length === 0) return 'Tipo'
     const sample = list[0]
     // prefer common keys
-    for (const k of ['Tipo', 'Tipo bomba', 'id', 'Tipo motor', 'Bomba']) {
-      if (k in sample) return k
+    const preferred = ['Tipo', 'Tipo bomba', 'Tipo motor', 'Bomba', 'Modelo', 'Pump', 'Nombre']
+    for (const key of preferred) {
+      if (key in sample && sample[key] !== undefined && sample[key] !== null && String(sample[key]).trim() !== '') {
+        return key
+      }
     }
-    return Object.keys(sample)[0]
+
+    const nonIdKeys = Object.keys(sample).filter((key) => key !== 'id' && sample[key] !== undefined && sample[key] !== null)
+    if (nonIdKeys.length > 0) {
+      return nonIdKeys[0]
+    }
+
+    return 'id' in sample ? 'id' : Object.keys(sample)[0]
   }
 
   async function fetchCurves() {
@@ -1348,8 +1465,22 @@ export default function App() {
   const renderSinglePumpControls = (): React.ReactNode => (
     <>
       <div className="panel-card">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '12px', alignItems: 'flex-end' }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr auto auto',
+            gap: '12px',
+            alignItems: 'flex-end'
+          }}
+        >
           <PumpSelector pumps={pumps} value={selected} onChange={setSelected} />
+          <button
+            type="button"
+            className="panel-action-button panel-action-button--ghost pump-manager-trigger"
+            onClick={() => setPumpManagerOpen(true)}
+          >
+            Gestionar bombas
+          </button>
           <label className="panel-field" style={{ margin: 0 }}>
             <span>Points per Curve</span>
             <input
@@ -1724,13 +1855,25 @@ export default function App() {
 
     const displayScenarioKeys = availableScenarioKeys.filter((key) => summariesByKey[key])
 
-    const scenarioOperatingPoints = scenarioOperatingSummary.map((entry) => ({
-      scenarioKey: entry.scenarioKey,
-      flow: entry.flow,
-      head: entry.head,
-      pwf: entry.pwf,
-      frequency: entry.frequency
-    }))
+    const scenarioOperatingPoints = scenarioOperatingSummary.map((entry) => {
+      const flow = typeof entry.intersectionFlow === 'number' && Number.isFinite(entry.intersectionFlow)
+        ? entry.intersectionFlow
+        : entry.flow
+      const head = typeof entry.intersectionHead === 'number' && Number.isFinite(entry.intersectionHead)
+        ? entry.intersectionHead
+        : entry.head
+      const pwf = typeof entry.intersectionPwf === 'number' && Number.isFinite(entry.intersectionPwf)
+        ? entry.intersectionPwf
+        : entry.pwf
+
+      return {
+        scenarioKey: entry.scenarioKey,
+        flow,
+        head,
+        pwf,
+        frequency: entry.frequency
+      }
+    })
 
     const renderScenarioOperatingTable = () => {
       if (!sensitivityEnabled || displayScenarioKeys.length === 0) {
@@ -1763,9 +1906,9 @@ export default function App() {
         { key: 'frequency', label: 'Frequency (Hz)', digits: 1 },
         { key: 'efficiency', label: 'Efficiency (%)', digits: 1, suffix: '%' },
         { key: 'bhp', label: 'BHP (HP)', digits: 1 },
-        { key: 'fluidLevel', label: 'Fluid Level (m)', digits: 1 },
-        { key: 'submergence', label: 'Submergence (m)', digits: 1 },
-        { key: 'friction', label: 'Friction Loss (m)', digits: 1 }
+        { key: 'fluidLevel', label: 'Fluid Level (m)', digits: 2 },
+        { key: 'submergence', label: 'Submergence (m)', digits: 2 },
+        { key: 'friction', label: 'Friction Loss (m)', digits: 2 }
       ]
 
       const metrics = metricDefinitions.map((definition) => ({
@@ -1774,14 +1917,14 @@ export default function App() {
       }))
 
       const exportScenarioOperatingPoints = () => {
-        const headers = [
+        const columnHeaders = [
           'Metric',
           ...activeScenarioKeysForTable.map(
             (scenarioKey) => scenarioStyles?.[scenarioKey]?.label || scenarioKey
           )
         ]
 
-        const rows = metrics.map((metric) => {
+        const dataRows = metrics.map((metric) => {
           const rowValues: (string | number | null)[] = [metric.label]
           activeScenarioKeysForTable.forEach((scenarioKey) => {
             const summary = summariesByKey[scenarioKey]
@@ -1795,27 +1938,128 @@ export default function App() {
           return rowValues
         })
 
-        const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows])
-        const totalColumns = headers.length
-        const totalRows = rows.length + 1
+        const summaryContextRows: (string | number | null)[][] = [
+          ['Selected Pump', selected || 'N/A'],
+          ['Base Stages', Number.isFinite(stages) ? stages : 'N/A'],
+          ['Base Frequency (Hz)', Number.isFinite(freq) ? Number(freq).toFixed(2) : 'N/A']
+        ]
+
+        const scenarioDetailRows = activeScenarioKeysForTable.map((scenarioKey) => {
+          const style = scenarioStyles?.[scenarioKey]
+          const label = style?.label || scenarioKey
+          const frequency = scenarioMeta?.[scenarioKey]?.frequency
+          const display = scenarioDisplayValues?.[scenarioKey]
+          const freqText = Number.isFinite(frequency) ? Number(frequency).toFixed(2) : 'N/A'
+          const qText = Number.isFinite(display?.qTest) ? display!.qTest : 'N/A'
+          const pwfText = Number.isFinite(display?.pwfTest) ? display!.pwfTest : 'N/A'
+          return [label, freqText, qText, pwfText]
+        })
+
+        const sheetRows: (string | number | null)[][] = []
+        sheetRows.push(['Simulation Export'])
+        sheetRows.push(...summaryContextRows)
+
+        let scenarioHeaderRowIndex: number | null = null
+
+        if (scenarioDetailRows.length > 0) {
+          sheetRows.push([''])
+          scenarioHeaderRowIndex = sheetRows.length
+          sheetRows.push(['Scenario', 'Frequency (Hz)', 'Q Test (m³/d)', 'Pwf Test (bar)'])
+          sheetRows.push(...scenarioDetailRows)
+        }
+
+        sheetRows.push([''])
+        const tableHeaderRowIndex = sheetRows.length
+        sheetRows.push(columnHeaders)
+        const tableDataStartRowIndex = sheetRows.length
+        sheetRows.push(...dataRows)
+
+        const worksheet = XLSX.utils.aoa_to_sheet(sheetRows)
+        const totalColumns = columnHeaders.length
 
         worksheet['!cols'] = [
-          { wch: 26 },
+          { wch: 28 },
           ...Array.from({ length: totalColumns - 1 }, () => ({ wch: 18 }))
         ]
 
-        const rangeRef = XLSX.utils.encode_range({
-          s: { r: 0, c: 0 },
-          e: { r: totalRows - 1, c: totalColumns - 1 }
+        const headerCellStyle: any = {
+          font: { bold: true, color: { rgb: 'FFFFFFFF' } },
+          fill: { fgColor: { rgb: '4A5568' } },
+          alignment: { horizontal: 'center' as const, vertical: 'center' as const }
+        }
+
+        const sectionHeaderStyle: any = {
+          font: { bold: true, color: { rgb: 'FFFFFFFF' } },
+          fill: { fgColor: { rgb: '2D3748' } },
+          alignment: { horizontal: 'center' as const, vertical: 'center' as const }
+        }
+
+        const titleCell = worksheet[XLSX.utils.encode_cell({ r: 0, c: 0 })]
+        if (titleCell) {
+          titleCell.s = {
+            font: { bold: true, sz: 14, color: { rgb: 'FFFFFFFF' } },
+            fill: { fgColor: { rgb: '1A2335' } },
+            alignment: { horizontal: 'left', vertical: 'center' }
+          }
+        }
+
+        summaryContextRows.forEach((_, index) => {
+          const labelCell = worksheet[XLSX.utils.encode_cell({ r: 1 + index, c: 0 })]
+          if (labelCell) {
+            labelCell.s = {
+              font: { bold: true, color: { rgb: 'DDE6FF' } }
+            }
+          }
         })
 
-        worksheet['!autofilter'] = { ref: rangeRef }
-        worksheet['!freeze'] = { xSplit: 1, ySplit: 1 }
+        if (scenarioHeaderRowIndex !== null) {
+          const headerRowIndex = scenarioHeaderRowIndex
+          const scenarioHeaderRow = sheetRows[headerRowIndex] || []
+          scenarioHeaderRow.forEach((_, colIndex) => {
+            const cellRef = XLSX.utils.encode_cell({ r: headerRowIndex, c: colIndex })
+            const cell = worksheet[cellRef]
+            if (cell) {
+              cell.s = sectionHeaderStyle
+            }
+          })
 
-        metrics.forEach((metric, metricIndex) => {
+          scenarioDetailRows.forEach((_, rowIndex) => {
+            const scenarioLabelCell = worksheet[XLSX.utils.encode_cell({
+              r: headerRowIndex + 1 + rowIndex,
+              c: 0
+            })]
+            if (scenarioLabelCell) {
+              scenarioLabelCell.s = { font: { bold: true, color: { rgb: 'C4D5FF' } } }
+            }
+          })
+        }
+
+        columnHeaders.forEach((_, colIndex) => {
+          const cellRef = XLSX.utils.encode_cell({ r: tableHeaderRowIndex, c: colIndex })
+          const cell = worksheet[cellRef]
+          if (cell) {
+            cell.s = headerCellStyle
+          }
+        })
+
+        const freezeRowCount = tableHeaderRowIndex + 1
+        worksheet['!freeze'] = { xSplit: 1, ySplit: freezeRowCount }
+
+        const autofilterRange = XLSX.utils.encode_range({
+          s: { r: tableHeaderRowIndex, c: 0 },
+          e: { r: tableHeaderRowIndex + dataRows.length, c: totalColumns - 1 }
+        })
+        worksheet['!autofilter'] = { ref: autofilterRange }
+
+        const tableNumberStartRow = tableDataStartRowIndex
+        dataRows.forEach((_, metricIndex) => {
+          const metric = metrics[metricIndex]
           const decimalPattern = metric.digits > 0 ? `0.${'0'.repeat(metric.digits)}` : '0'
           activeScenarioKeysForTable.forEach((_, scenarioIndex) => {
-            const cellRef = XLSX.utils.encode_cell({ r: metricIndex + 1, c: scenarioIndex + 1 })
+            const cellRef = XLSX.utils.encode_cell({
+              r: tableNumberStartRow + metricIndex,
+              c: scenarioIndex + 1
+            })
             const cell = worksheet[cellRef]
             if (cell && typeof cell.v === 'number') {
               cell.z = decimalPattern
@@ -1823,8 +2067,219 @@ export default function App() {
           })
         })
 
+        worksheet['!merges'] = worksheet['!merges'] || []
+        worksheet['!merges'].push({
+          s: { r: 0, c: 0 },
+          e: { r: 0, c: Math.max(totalColumns - 1, 0) }
+        })
+
         const workbook = XLSX.utils.book_new()
-        XLSX.utils.book_append_sheet(workbook, worksheet, 'Operating Points')
+        const operatingSheetName = 'Operating Points'
+        XLSX.utils.book_append_sheet(workbook, worksheet, operatingSheetName)
+
+        const usedSheetNames = new Set<string>([operatingSheetName])
+
+        const sanitizeSheetName = (name: string) => name.replace(/[\\/?*\[\]:]/g, '_').trim()
+        const getUniqueSheetName = (desired: string, fallback: string) => {
+          const MAX_LENGTH = 31
+          const baseNameRaw = sanitizeSheetName(desired) || sanitizeSheetName(fallback) || 'Scenario'
+          const baseName = baseNameRaw.slice(0, MAX_LENGTH) || 'Scenario'
+          let candidate = baseName
+          let counter = 1
+          while (usedSheetNames.has(candidate)) {
+            const suffix = `-${counter}`
+            const trimmedBase = baseName.slice(0, Math.max(MAX_LENGTH - suffix.length, 1))
+            candidate = `${trimmedBase}${suffix}`
+            counter += 1
+          }
+          usedSheetNames.add(candidate)
+          return candidate
+        }
+
+        const scenarioKeysForCurveExport = activeScenarioKeysForTable.filter(
+          (scenarioKey) => scenarioPumpCurves?.[scenarioKey]
+        )
+
+        const toKey = (value: number) => value.toFixed(6)
+
+        const buildSeriesMap = (series: any[] | undefined, multiplier = 1) => {
+          const map = new Map<string, number>()
+          if (!Array.isArray(series)) {
+            return map
+          }
+          series.forEach((point: any) => {
+            const flow = Number(point?.caudal)
+            const rawValue = Number(point?.valor)
+            if (Number.isFinite(flow) && Number.isFinite(rawValue)) {
+              map.set(toKey(flow), rawValue * multiplier)
+            }
+          })
+          return map
+        }
+
+        scenarioKeysForCurveExport.forEach((scenarioKey, index) => {
+          const pumpCurve = scenarioPumpCurves?.[scenarioKey]
+          if (!pumpCurve) {
+            return
+          }
+
+          const demandSource = pressureDemandScenarios?.[scenarioKey] || pressureDemandCurve
+          const scenarioLabel = scenarioStyles?.[scenarioKey]?.label || scenarioKey
+          const sheetName = getUniqueSheetName(scenarioLabel || '', `Scenario ${index + 1}`)
+
+          const sheetData: (string | number | null)[][] = []
+          sheetData.push(['Scenario', scenarioLabel])
+
+          const freqValue = scenarioMeta?.[scenarioKey]?.frequency
+          sheetData.push([
+            'Frequency (Hz)',
+            Number.isFinite(freqValue) ? Number(freqValue).toFixed(2) : 'N/A'
+          ])
+
+          const display = scenarioDisplayValues?.[scenarioKey]
+          if (display && (Number.isFinite(display.qTest) || Number.isFinite(display.pwfTest))) {
+            sheetData.push([
+              'Override Q Test (m³/d)',
+              Number.isFinite(display.qTest) ? Number(display.qTest) : 'N/A'
+            ])
+            sheetData.push([
+              'Override Pwf (bar)',
+              Number.isFinite(display.pwfTest) ? Number(display.pwfTest) : 'N/A'
+            ])
+          }
+
+          sheetData.push([''])
+          const pumpSectionTitleRow = sheetData.length
+          sheetData.push(['Pump Curve Data'])
+          const pumpHeaderRowIndex = sheetData.length
+          sheetData.push(['Flow (m³/d)', 'Head (m)', 'Efficiency (%)', 'BHP (HP)'])
+
+          const efficiencyMap = buildSeriesMap(pumpCurve.efficiency, 100)
+          const bhpMap = buildSeriesMap(pumpCurve.bhp)
+
+          const pumpRows = Array.isArray(pumpCurve.head)
+            ? pumpCurve.head
+                .map((point: any) => {
+                  const flow = Number(point?.caudal)
+                  const headValue = Number(point?.valor)
+                  if (!Number.isFinite(flow) || !Number.isFinite(headValue)) {
+                    return null
+                  }
+                  const key = toKey(flow)
+                  const eff = efficiencyMap.get(key)
+                  const bhp = bhpMap.get(key)
+                  return [flow, headValue, eff ?? null, bhp ?? null]
+                })
+                .filter((row): row is (number | null)[] => Array.isArray(row))
+            : []
+
+          sheetData.push(...pumpRows)
+
+          let demandHeaderRowIndex: number | null = null
+          let demandTableHeaderRowIndex: number | null = null
+          let demandRows: (number | null)[][] = []
+
+          if (demandSource && Array.isArray(demandSource.curve) && demandSource.curve.length > 0) {
+            sheetData.push([''])
+            demandHeaderRowIndex = sheetData.length
+            sheetData.push(['Demand Curve Data'])
+            demandTableHeaderRowIndex = sheetData.length
+            sheetData.push([
+              'Flow (m³/d)',
+              'TDH (m)',
+              'Pwf (bar)',
+              'PIP (bar)',
+              'Fluid Level (m)',
+              'Friction Loss (m)'
+            ])
+
+            demandRows = demandSource.curve
+              .map((point: any) => {
+                const flow = Number(point?.caudal)
+                const tdh = Number(point?.tdh)
+                const pwfValue = Number(point?.pwf)
+                const pip = Number(point?.pip)
+                const nivel = Number(point?.nivel)
+                const friction = Number(point?.perdidas_friccion)
+                if (!Number.isFinite(flow)) {
+                  return null
+                }
+                return [
+                  flow,
+                  Number.isFinite(tdh) ? tdh : null,
+                  Number.isFinite(pwfValue) ? pwfValue : null,
+                  Number.isFinite(pip) ? pip : null,
+                  Number.isFinite(nivel) ? nivel : null,
+                  Number.isFinite(friction) ? friction : null
+                ]
+              })
+              .filter((row): row is (number | null)[] => Array.isArray(row))
+
+            sheetData.push(...demandRows)
+          }
+
+          const scenarioSheet = XLSX.utils.aoa_to_sheet(sheetData)
+          scenarioSheet['!cols'] = [
+            { wch: 22 },
+            { wch: 16 },
+            { wch: 16 },
+            { wch: 16 },
+            { wch: 18 },
+            { wch: 18 }
+          ]
+
+          const applyRowStyle = (rowIndex: number | null, style: any) => {
+            if (rowIndex === null) {
+              return
+            }
+            const row = sheetData[rowIndex] || []
+            row.forEach((_, colIndex) => {
+              const ref = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex })
+              const cell = scenarioSheet[ref]
+              if (cell) {
+                cell.s = style
+              }
+            })
+          }
+
+          applyRowStyle(pumpSectionTitleRow, sectionHeaderStyle)
+          applyRowStyle(pumpHeaderRowIndex, headerCellStyle)
+          applyRowStyle(demandHeaderRowIndex, sectionHeaderStyle)
+          applyRowStyle(demandTableHeaderRowIndex, headerCellStyle)
+
+          const pumpFormats = ['0.0', '0.0', '0.0', '0.0']
+          pumpRows.forEach((_, rowIndex) => {
+            pumpFormats.forEach((pattern, columnIndex) => {
+              const ref = XLSX.utils.encode_cell({
+                r: pumpHeaderRowIndex + 1 + rowIndex,
+                c: columnIndex
+              })
+              const cell = scenarioSheet[ref]
+              if (cell && typeof cell.v === 'number') {
+                cell.z = pattern
+              }
+            })
+          })
+
+          if (demandTableHeaderRowIndex !== null) {
+            const demandFormats = ['0.0', '0.0', '0.0', '0.0', '0.0', '0.0']
+            demandRows.forEach((_, rowIndex) => {
+              demandFormats.forEach((pattern, columnIndex) => {
+                const ref = XLSX.utils.encode_cell({
+                  r: demandTableHeaderRowIndex + 1 + rowIndex,
+                  c: columnIndex
+                })
+                const cell = scenarioSheet[ref]
+                if (cell && typeof cell.v === 'number') {
+                  cell.z = pattern
+                }
+              })
+            })
+          }
+
+          XLSX.utils.book_append_sheet(workbook, scenarioSheet, sheetName)
+        })
+
         XLSX.writeFile(workbook, 'system-operating-points.xlsx')
       }
 
@@ -1861,7 +2316,30 @@ export default function App() {
                     <td className="metric-label">{metric.label}</td>
                     {activeScenarioKeysForTable.map((scenarioKey) => {
                       const summary = summariesByKey[scenarioKey]
-                      const value = summary ? summary[metric.key as keyof typeof summary] : null
+                      let value = summary ? summary[metric.key as keyof typeof summary] : null
+
+                      if (summary) {
+                        switch (metric.key) {
+                          case 'flow':
+                            value = typeof summary.intersectionFlow === 'number' && Number.isFinite(summary.intersectionFlow)
+                              ? summary.intersectionFlow
+                              : summary.flow
+                            break
+                          case 'head':
+                            value = typeof summary.intersectionHead === 'number' && Number.isFinite(summary.intersectionHead)
+                              ? summary.intersectionHead
+                              : summary.head
+                            break
+                          case 'pwf':
+                            value = typeof summary.intersectionPwf === 'number' && Number.isFinite(summary.intersectionPwf)
+                              ? summary.intersectionPwf
+                              : summary.pwf
+                            break
+                          default:
+                            break
+                        }
+                      }
+
                       return (
                         <td
                           key={`${metric.key}-${scenarioKey}`}
@@ -2203,6 +2681,13 @@ export default function App() {
         values={openScenarioKey ? scenarioDisplayValues?.[openScenarioKey] : null}
         onClose={closeScenarioModal}
         onSave={handleScenarioOverrideSave}
+      />
+      <PumpManagerModal
+        isOpen={isPumpManagerOpen}
+        activePumpId={selected}
+        onClose={() => setPumpManagerOpen(false)}
+        onSelect={(pumpId) => handlePumpSelectedFromManager(pumpId)}
+        onCatalogChanged={handlePumpCatalogChanged}
       />
     </div>
   )

@@ -78,6 +78,8 @@ MOTOR_VOLTAGE_CANDIDATES = ['VOLT NOM', 'VOLT', 'voltaje', 'VOLTAGE']
 # --- Variables Globales ---
 PUMP_CATALOG = None
 MOTOR_CATALOG = None
+PUMP_SHEET_NAME = None
+MOTOR_SHEET_NAME = None
 
 # Variables de columna (valores por defecto para compatibilidad)
 COL_PUMP_ID = 'Tipo'
@@ -113,13 +115,15 @@ def load_catalogs():
     """
     Carga los catálogos de equipos (bombas, motores) desde un archivo Excel.
     """
-    global PUMP_CATALOG, MOTOR_CATALOG
-    
+    global PUMP_CATALOG, MOTOR_CATALOG, PUMP_SHEET_NAME, MOTOR_SHEET_NAME
+
     try:
         print(f"Intentando cargar '{EXCEL_FILE_NAME}'...")
         xls = pd.ExcelFile(EXCEL_FILE_NAME)
         pump_sheet = find_sheet_name(xls, PUMP_SHEET_CANDIDATES)
         motor_sheet = find_sheet_name(xls, MOTOR_SHEET_CANDIDATES)
+        PUMP_SHEET_NAME = pump_sheet
+        MOTOR_SHEET_NAME = motor_sheet
         print(f"  Hoja detectada para bombas: '{pump_sheet}'")
         print(f"  Hoja detectada para motores: '{motor_sheet}'")
         PUMP_CATALOG = pd.read_excel(EXCEL_FILE_NAME, sheet_name=pump_sheet)
@@ -233,8 +237,8 @@ def get_column_mapping():
         load_catalogs()
 
     return {
-        'pump_sheet': None,
-        'motor_sheet': None,
+        'pump_sheet': PUMP_SHEET_NAME,
+        'motor_sheet': MOTOR_SHEET_NAME,
         'pump_id_col': COL_PUMP_ID,
         'pump_min_q_col': COL_PUMP_MIN_Q,
         'pump_max_q_col': COL_PUMP_MAX_Q,
@@ -246,6 +250,26 @@ def get_column_mapping():
         'motor_amps_col': COL_MOTOR_AMPS,
         'motor_voltage_col': COL_MOTOR_VOLTAGE
     }
+
+
+def get_pump_sheet_name():
+    if PUMP_CATALOG is None:
+        load_catalogs()
+    return PUMP_SHEET_NAME
+
+
+def get_motor_sheet_name():
+    if MOTOR_CATALOG is None:
+        load_catalogs()
+    return MOTOR_SHEET_NAME
+
+
+def get_catalog_excel_path():
+    return EXCEL_FILE_NAME
+
+
+def refresh_catalogs():
+    load_catalogs()
 
 def get_pump_performance_curves(pump_id, freq_hz: float = 50.0, stages: int = 300, n_points: int = 300):
     """
