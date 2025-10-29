@@ -18,6 +18,13 @@ const DEFAULT_SCENARIO_STYLES = {
 }
 const FALLBACK_SCENARIO_STYLE = { label: 'System Demand', color: '#c0392b', dash: 'dot', symbol: 'star' }
 
+const DEFAULT_MOTOR_ID = 'N406AM130 2400V SGL'
+const DEFAULT_MLE_CABLE_ID = 'awg_6'
+const DEFAULT_DOWNHOLE_CABLE_ID = 'awg_4'
+const DEFAULT_SURFACE_CABLE_ID = 'awg_4'
+const DEFAULT_MLE_LENGTH_METERS = 20
+const DEFAULT_SURFACE_LENGTH_METERS = 70
+
 type ScenarioOverride = {
   freq?: number
   qTest?: number
@@ -125,11 +132,27 @@ export default function App() {
   const selectedRef = useRef<string | null>(null)
   const [individualCurves, setIndividualCurves] = useState<any[]>([])
 
+  const [motorCatalog, setMotorCatalog] = useState<any[]>([])
+  const [motorIdKey, setMotorIdKey] = useState<string>('Tipo')
+  const [motorLabelKey, setMotorLabelKey] = useState<string | null>(null)
+  const [selectedMotorId, setSelectedMotorId] = useState<string | null>(DEFAULT_MOTOR_ID)
+
+  const [cableCatalog, setCableCatalog] = useState<any[]>([])
+  const [selectedCableMle, setSelectedCableMle] = useState<string | null>(DEFAULT_MLE_CABLE_ID)
+  const [selectedCableFondo, setSelectedCableFondo] = useState<string | null>(DEFAULT_DOWNHOLE_CABLE_ID)
+  const [selectedCableSuperficie, setSelectedCableSuperficie] = useState<string | null>(DEFAULT_SURFACE_CABLE_ID)
+  const [mleLengthMeters, setMleLengthMeters] = useState<number>(DEFAULT_MLE_LENGTH_METERS)
+  const [surfaceLengthMeters, setSurfaceLengthMeters] = useState<number>(DEFAULT_SURFACE_LENGTH_METERS)
+
+  const [tempSuperficieGrad, setTempSuperficieGrad] = useState<number>(15)
+  const [gradienteTemperatura, setGradienteTemperatura] = useState<number>(0.0425)
+  const [tempAmbienteSuperficie, setTempAmbienteSuperficie] = useState<number>(25)
+
   const [isPumpManagerOpen, setPumpManagerOpen] = useState(false)
   
   // Estado para controlar pestañas
-  const [configTab, setConfigTab] = useState<'pump' | 'installation' | 'ipr'>('pump')
-  const [visualTab, setVisualTab] = useState<'curves' | 'ipr' | 'demand'>('curves')
+  const [configTab, setConfigTab] = useState<'motor' | 'cable' | 'pump' | 'installation' | 'ipr'>('motor')
+  const [visualTab, setVisualTab] = useState<'curves' | 'ipr' | 'demand' | 'electrical'>('curves')
   const [pumpCurvesTab, setPumpCurvesTab] = useState<'combined' | 'efficiency' | 'head' | 'bhp'>('combined')
   
   // Estados para modo comparador
@@ -195,6 +218,36 @@ export default function App() {
   const [scenarioMeta, setScenarioMeta] = useState<Record<string, { frequency?: number }>>({})
   const [scenarioPumpLoading, setScenarioPumpLoading] = useState(false)
   const prevSensitivityEnabledRef = useRef(false)
+  const [electricalData, setElectricalData] = useState<any>(null)
+  const [scenarioElectricalData, setScenarioElectricalData] = useState<Record<string, any>>({})
+
+  const motorCatalogById = useMemo(() => {
+    const mapping: Record<string, any> = {}
+    motorCatalog.forEach((entry: any) => {
+      const idValue = entry?.[motorIdKey]
+      if (idValue !== undefined && idValue !== null) {
+        mapping[String(idValue).trim()] = entry
+      }
+    })
+    return mapping
+  }, [motorCatalog, motorIdKey])
+
+  const selectedMotorEntry = selectedMotorId ? motorCatalogById[selectedMotorId] : null
+
+  const cableCatalogById = useMemo(() => {
+    const mapping: Record<string, any> = {}
+    cableCatalog.forEach((entry: any) => {
+      const idValue = entry?.id ?? entry?.name ?? entry?.Tipo
+      if (idValue !== undefined && idValue !== null) {
+        mapping[String(idValue).trim()] = entry
+      }
+    })
+    return mapping
+  }, [cableCatalog])
+
+  const selectedCableMleEntry = selectedCableMle ? cableCatalogById[selectedCableMle] : null
+  const selectedCableFondoEntry = selectedCableFondo ? cableCatalogById[selectedCableFondo] : null
+  const selectedCableSuperficieEntry = selectedCableSuperficie ? cableCatalogById[selectedCableSuperficie] : null
 
   const scenarioOverridesForIpr = useMemo(() => {
     const filtered: Record<string, ScenarioOverride> = {}
@@ -299,6 +352,8 @@ export default function App() {
     scenarioOrder: sensitivityEnabled ? availableScenarioKeys : [],
     activeScenarioKey: sensitivityEnabled ? primaryScenarioKey : null
   }
+
+  const hasElectricalResults = Boolean(electricalData) || Object.keys(scenarioElectricalData || {}).length > 0
 
   const handleScenarioToggle = (scenarioKey: string) => {
     setScenarioVisibility((prev) => ({
@@ -458,6 +513,9 @@ export default function App() {
       }
       if (typeof override.pwfTest === 'number' && Number.isFinite(override.pwfTest)) {
         entry.pwf_test = override.pwfTest
+      }
+      if (typeof override.freq === 'number' && Number.isFinite(override.freq)) {
+        entry.frequency_hz = override.freq
       }
       if (Object.keys(entry).length > 0) {
         result[key] = entry
@@ -773,57 +831,61 @@ export default function App() {
       const nivel = interpolateFromSeries(nivelSeries, hydraulicFlow)
       const friction = interpolateFromSeries(frictionSeries, hydraulicFlow)
 
+
+      // Usar la Pwf del punto de intersección salvo override explícito
+      const intersectionPwf = intersectionFlow !== null
+        ? toFiniteNumber(interpolateFromSeries(pwfSeries, intersectionFlow))
+        : null;
+
+      // Si el usuario bloqueó Pwf, usar el override; si no, usar la Pwf de la intersección
       const pwfValue = pwfLocked && manualPwf !== null
         ? manualPwf
-        : toFiniteNumber(pwfFromDemand)
+        : intersectionPwf;
 
       const demandHeadAtIntersection = intersectionFlow !== null
         ? toFiniteNumber(interpolateValue(demandQ, demandHead, intersectionFlow))
-        : null
+        : null;
       const pumpHeadAtIntersection = intersectionFlow !== null
         ? toFiniteNumber(interpolateValue(pumpQ, pumpHead, intersectionFlow))
-        : null
+        : null;
       const intersectionHeadValue =
         intersectionHeadCandidate
         ?? demandHeadAtIntersection
-        ?? pumpHeadAtIntersection
+        ?? pumpHeadAtIntersection;
 
-      const intersectionPwf = intersectionFlow !== null
-        ? toFiniteNumber(interpolateFromSeries(pwfSeries, intersectionFlow))
-        : null
-
-      const components = demandSource.components || {}
+      const components = demandSource.components || {};
       const gradient = typeof components.gradiente === 'number'
         ? components.gradiente
         : (typeof pressureDemandCurve?.components?.gradiente === 'number'
           ? pressureDemandCurve.components.gradiente
-          : null)
+          : null);
 
       const pumpDepth = typeof components.profundidad_bomba === 'number'
         ? components.profundidad_bomba
         : (typeof pressureDemandCurve?.components?.profundidad_bomba === 'number'
           ? pressureDemandCurve.components.profundidad_bomba
-          : null)
+          : null);
 
-      let submergence: number | null = null
-      if (typeof gradient === 'number' && gradient > 0 && typeof pwfValue === 'number') {
-        const rawSub = pwfValue / gradient
+      let submergence: number | null = null;
+      // Siempre recalcular submergence y fluidLevel con la Pwf actual del punto de intersección
+      if (typeof gradient === 'number' && gradient > 0 && typeof intersectionPwf === 'number') {
+        const rawSub = intersectionPwf / gradient;
         if (Number.isFinite(rawSub)) {
-          submergence = Math.max(rawSub, 0)
+          submergence = Math.max(rawSub, 0);
         }
       }
 
-      let fluidLevel: number | null = null
+      let fluidLevel: number | null = null;
       if (typeof pumpDepth === 'number' && typeof submergence === 'number') {
-        const rawLevel = pumpDepth - submergence
+        const rawLevel = pumpDepth - submergence;
         if (Number.isFinite(rawLevel)) {
-          fluidLevel = Math.min(Math.max(rawLevel, 0), pumpDepth)
+          fluidLevel = Math.min(Math.max(rawLevel, 0), pumpDepth);
         }
       }
 
       const frequency = scenarioMeta?.[scenarioKey]?.frequency
         ?? displayValues?.freq
-        ?? freq
+        ?? freq;
 
       const headValue = demandHeadAtFlow !== null
         ? demandHeadAtFlow
@@ -946,6 +1008,112 @@ export default function App() {
     loadPumpCatalog()
   }, [loadPumpCatalog])
 
+  useEffect(() => {
+    const loadEquipmentCatalogs = async () => {
+      try {
+        const response = await axios.get('/api/catalogs')
+        const catalogs = response.data?.catalogs || {}
+
+        const motors = Array.isArray(catalogs.motors) ? catalogs.motors : []
+        setMotorCatalog(motors)
+        if (motors.length > 0) {
+          const descriptionKey = findEntryKey(motors[0], ['descripción', 'descripcion', 'Descripción', 'Descripcion'])
+          const idKey = descriptionKey || equipmentIdKey(motors)
+          setMotorIdKey(idKey)
+          setMotorLabelKey(descriptionKey && descriptionKey !== idKey ? descriptionKey : null)
+
+          const availableMotorIds = motors
+            .map((entry: any) => entry?.[idKey])
+            .filter((value: any) => value !== undefined && value !== null && String(value).trim().length > 0)
+            .map((value: any) => String(value).trim())
+
+          const normalizedDefaultMotor = normalizeIdentifier(DEFAULT_MOTOR_ID)
+          const defaultMatch = availableMotorIds.find((candidate) => normalizeIdentifier(candidate) === normalizedDefaultMotor) || null
+
+          setSelectedMotorId((prev) => {
+            if (defaultMatch) {
+              return defaultMatch
+            }
+            if (prev) {
+              const normalizedPrev = normalizeIdentifier(prev)
+              const prevMatch = availableMotorIds.find((candidate) => normalizeIdentifier(candidate) === normalizedPrev)
+              if (prevMatch) {
+                return prevMatch
+              }
+            }
+            return availableMotorIds[0] || null
+          })
+        } else {
+          setMotorIdKey('Descripción')
+          setMotorLabelKey(null)
+          setSelectedMotorId(DEFAULT_MOTOR_ID)
+        }
+
+        const cables = Array.isArray(catalogs.cables) ? catalogs.cables : []
+        setCableCatalog(cables)
+        if (cables.length > 0) {
+          const availableCableIds = cables
+            .map((entry: any) => entry?.id ?? entry?.name ?? entry?.Tipo)
+            .filter((value: any) => value !== undefined && value !== null && String(value).trim().length > 0)
+            .map((value: any) => String(value).trim())
+
+          const fallbackCableId = availableCableIds[0] || null
+
+          const defaultMleMatch = availableCableIds.find((candidate) => normalizeIdentifier(candidate) === normalizeIdentifier(DEFAULT_MLE_CABLE_ID)) || null
+          const defaultDownholeMatch = availableCableIds.find((candidate) => normalizeIdentifier(candidate) === normalizeIdentifier(DEFAULT_DOWNHOLE_CABLE_ID)) || null
+          const defaultSurfaceMatch = availableCableIds.find((candidate) => normalizeIdentifier(candidate) === normalizeIdentifier(DEFAULT_SURFACE_CABLE_ID)) || null
+
+          setSelectedCableMle((prev) => {
+            if (defaultMleMatch) {
+              return defaultMleMatch
+            }
+            if (prev) {
+              const prevMatch = availableCableIds.find((candidate) => normalizeIdentifier(candidate) === normalizeIdentifier(prev))
+              if (prevMatch) {
+                return prevMatch
+              }
+            }
+            return fallbackCableId
+          })
+
+          setSelectedCableFondo((prev) => {
+            if (defaultDownholeMatch) {
+              return defaultDownholeMatch
+            }
+            if (prev) {
+              const prevMatch = availableCableIds.find((candidate) => normalizeIdentifier(candidate) === normalizeIdentifier(prev))
+              if (prevMatch) {
+                return prevMatch
+              }
+            }
+            return fallbackCableId
+          })
+
+          setSelectedCableSuperficie((prev) => {
+            if (defaultSurfaceMatch) {
+              return defaultSurfaceMatch
+            }
+            if (prev) {
+              const prevMatch = availableCableIds.find((candidate) => normalizeIdentifier(candidate) === normalizeIdentifier(prev))
+              if (prevMatch) {
+                return prevMatch
+              }
+            }
+            return fallbackCableId
+          })
+        } else {
+          setSelectedCableMle(DEFAULT_MLE_CABLE_ID)
+          setSelectedCableFondo(DEFAULT_DOWNHOLE_CABLE_ID)
+          setSelectedCableSuperficie(DEFAULT_SURFACE_CABLE_ID)
+        }
+      } catch (catalogError) {
+        console.error('Error loading equipment catalogs:', catalogError)
+      }
+    }
+
+    loadEquipmentCatalogs()
+  }, [])
+
   const handlePumpCatalogChanged = React.useCallback(async () => {
     await loadPumpCatalog({ preserveSelection: true })
   }, [loadPumpCatalog])
@@ -1008,6 +1176,60 @@ export default function App() {
     }
 
     return 'id' in sample ? 'id' : Object.keys(sample)[0]
+  }
+
+  function pickEntryValue(entry: any, candidates: string[]) {
+    if (!entry || typeof entry !== 'object') {
+      return undefined
+    }
+    const lowered: Record<string, string> = {}
+    Object.keys(entry).forEach((key) => {
+      lowered[key.toLowerCase()] = key
+    })
+    for (const candidate of candidates || []) {
+      if (!candidate) continue
+      const actualKey = lowered[candidate.toLowerCase()]
+      if (actualKey !== undefined) {
+        return entry[actualKey]
+      }
+    }
+    return undefined
+  }
+
+  function findEntryKey(entry: any, candidates: string[]) {
+    if (!entry || typeof entry !== 'object') {
+      return null
+    }
+    const lowered: Record<string, string> = {}
+    Object.keys(entry).forEach((key) => {
+      lowered[key.toLowerCase()] = key
+    })
+    for (const candidate of candidates || []) {
+      if (!candidate) continue
+      const actualKey = lowered[candidate.toLowerCase()]
+      if (actualKey !== undefined) {
+        return actualKey
+      }
+    }
+    return null
+  }
+
+  function formatNumericValue(value: any, digits = 2) {
+    const numeric = Number(value)
+    if (Number.isFinite(numeric)) {
+      return numeric.toFixed(digits)
+    }
+    if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
+      return '—'
+    }
+    return String(value)
+  }
+
+  function normalizeIdentifier(value: any) {
+    if (value === undefined || value === null) {
+      return ''
+    }
+    return String(value).trim().replace(/\s+/g, ' ').toLowerCase()
   }
 
   async function fetchCurves() {
@@ -1205,8 +1427,29 @@ export default function App() {
   // Función para calcular IPR
   async function fetchIPR() {
     console.log('🚀 fetchIPR() llamado - numPumpsDesign:', numPumpsDesign)
+
+    if (!selected) {
+      setError('Select a pump before running the calculation.')
+      return
+    }
+
+    if (!selectedMotorId) {
+      setError('Select a motor before running the calculation.')
+      return
+    }
+
+    if (!selectedCableMle || !selectedCableFondo || !selectedCableSuperficie) {
+      setError('Select cable types for MLE, downhole, and surface sections before running the calculation.')
+      return
+    }
+
+    const normalizedMleLength = Number.isFinite(mleLengthMeters) ? Math.max(mleLengthMeters, 0) : 0
+    const normalizedSurfaceLength = Number.isFinite(surfaceLengthMeters) ? Math.max(surfaceLengthMeters, 0) : 0
+
     setLoading(true)
     setError(null)
+    setElectricalData(null)
+    setScenarioElectricalData({})
     try {
       const wellData = {
         method: iprMethod,
@@ -1244,7 +1487,54 @@ export default function App() {
         wellData.sensitivity_overrides = overridesPayload
       }
 
-      const res = await axios.post('/api/calculate_conditions', wellData)
+      const pumpConfigPayload: any = {
+        pump_id: selected,
+        stages,
+        stages_count: stages,
+        frequency_hz: freq,
+        num_pumps_design: numPumpsDesign
+      }
+
+      const designPumpPayload = designPumps
+        .slice(0, numPumpsDesign)
+        .filter((item) => item && item.id)
+        .map((item) => ({ pump_id: item.id, stages: item.stages }))
+
+      if (designPumpPayload.length > 0) {
+        pumpConfigPayload.design_pumps = designPumpPayload
+      }
+
+      const motorConfigPayload = {
+        motor_id: selectedMotorId
+      }
+
+      const cableConfigPayload = {
+        mle_tipo_id: selectedCableMle,
+        mle_longitud: normalizedMleLength,
+        fondo_tipo_id: selectedCableFondo,
+        superficie_tipo_id: selectedCableSuperficie,
+        superficie_longitud: normalizedSurfaceLength
+      }
+
+      const configuracionPozoPayload = {
+        temp_superficie_grad: tempSuperficieGrad,
+        gradiente_temp: gradienteTemperatura,
+        temp_ambiente_superficie: tempAmbienteSuperficie
+      }
+
+      const requestPayload: any = {
+        well_data: wellData,
+        pump_config: pumpConfigPayload,
+        motor_config: motorConfigPayload,
+        cable_config: cableConfigPayload,
+        configuracion_pozo: configuracionPozoPayload
+      }
+
+      if (sensitivityEnabled && Object.keys(overridesPayload).length > 0) {
+        requestPayload.sensitivity_overrides = overridesPayload
+      }
+
+      const res = await axios.post('/api/calculate_conditions', requestPayload)
       const payload = res.data || {}
       
       // DEBUG: Verificar respuesta del backend
@@ -1280,18 +1570,55 @@ export default function App() {
         }
 
         const baseCurve = payload.pressure_demand_curve || null
-        const serverScenarioCurves = payload.pressure_demand_scenarios || {}
+        const serverScenarioCurvesRaw = payload.pressure_demand_scenarios || {}
+        const serverIprScenariosRaw = payload.ipr_scenarios || {}
+
+        const normalizedIprScenarios: Record<string, any> = {}
+        const scenarioElectricalMap: Record<string, any> = {}
+        const combinedScenarioCurves: Record<string, any> = { ...serverScenarioCurvesRaw }
+
+        Object.entries(serverIprScenariosRaw || {}).forEach(([key, value]) => {
+          if (!key || !value) return
+          if (typeof value === 'object') {
+            const entry: any = value
+            const iprSource = entry.ipr || entry
+            if (iprSource) {
+              normalizedIprScenarios[key] = cloneCurve(iprSource)
+            }
+            if (entry.electrical_data) {
+              scenarioElectricalMap[key] = entry.electrical_data
+            }
+            if (entry.pressure_demand_curve) {
+              combinedScenarioCurves[key] = entry.pressure_demand_curve
+            }
+          } else {
+            normalizedIprScenarios[key] = value
+          }
+        })
+
+        if (payload.electrical_scenarios) {
+          Object.entries(payload.electrical_scenarios).forEach(([key, value]) => {
+            if (!key || !value) return
+            scenarioElectricalMap[key] = value
+          })
+        }
+
+        setElectricalData(payload.electrical_data || null)
+        setScenarioElectricalData(scenarioElectricalMap)
 
         const allScenarioKeys = new Set<string>([...nextScenarioOrder, ...DEFAULT_SCENARIO_ORDER])
-        Object.keys(serverScenarioCurves || {}).forEach((key) => allScenarioKeys.add(key))
+        Object.keys(combinedScenarioCurves || {}).forEach((key) => allScenarioKeys.add(key))
+        Object.keys(normalizedIprScenarios || {}).forEach((key) => allScenarioKeys.add(key))
         Object.keys(scenarioOverridesForIpr || {}).forEach((key) => allScenarioKeys.add(key))
 
         const nextScenarioCurves: Record<string, any> = {}
         allScenarioKeys.forEach((key) => {
           if (!key) return
-          const hasOverride = Object.prototype.hasOwnProperty.call(scenarioOverridesForIpr, key)
-          const serverCurve = serverScenarioCurves?.[key]
-          const sourceCurve = hasOverride && serverCurve ? serverCurve : baseCurve
+          if (!normalizedIprScenarios[key] && payload.ipr_data) {
+            normalizedIprScenarios[key] = cloneCurve(payload.ipr_data)
+          }
+          const serverCurve = combinedScenarioCurves?.[key]
+          const sourceCurve = serverCurve || baseCurve
           if (sourceCurve) {
             nextScenarioCurves[key] = cloneCurve(sourceCurve)
           }
@@ -1299,7 +1626,7 @@ export default function App() {
 
         setScenarioOrder(nextScenarioOrder)
         setScenarioDefinitions(payload.scenario_definitions || {})
-        setIprScenarios(payload.ipr_scenarios || {})
+        setIprScenarios(normalizedIprScenarios)
         setPressureDemandCurve(baseCurve)
         setPressureDemandScenarios(nextScenarioCurves)
 
@@ -1370,6 +1697,17 @@ export default function App() {
     presionCasing,
     tubingIdMm,
     tubingRoughness,
+    // Parámetros eléctricos y selección de motor/cable
+    freq,
+    selectedMotorId,
+    selectedCableMle,
+    selectedCableFondo,
+    selectedCableSuperficie,
+    mleLengthMeters,
+    surfaceLengthMeters,
+    tempSuperficieGrad,
+    gradienteTemperatura,
+    tempAmbienteSuperficie,
     // IMPORTANTE: Recalcular cuando cambia el número de bombas
     numPumpsDesign,
     scenarioOverridesForIprSignature
@@ -1744,6 +2082,285 @@ export default function App() {
       </div>
     </>
   )
+
+  const renderMotorConfiguration = (): React.ReactNode => {
+    const hasCatalog = motorCatalog.length > 0
+
+    const buildMotorLabel = (entry: any) => {
+      if (!entry || typeof entry !== 'object') {
+        return 'Unknown motor'
+      }
+      const idValue = entry?.[motorIdKey]
+      const idText = idValue !== undefined && idValue !== null ? String(idValue) : 'Unknown motor'
+      const descriptionCandidate = motorLabelKey ? entry?.[motorLabelKey] : pickEntryValue(entry, ['Descripción', 'Descripcion'])
+      const descriptionText = descriptionCandidate !== undefined && descriptionCandidate !== null
+        ? String(descriptionCandidate).trim()
+        : ''
+      return descriptionText || idText
+    }
+
+    return (
+      <div className="panel-card">
+        <label className="panel-field">
+          <span>Motor</span>
+          <select
+            value={selectedMotorId ?? ''}
+            onChange={(event) => {
+              const nextValue = event.target.value ? event.target.value.trim() : null
+              setSelectedMotorId(nextValue)
+            }}
+          >
+            <option value="">Select a motor</option>
+            {motorCatalog.map((entry: any, index: number) => {
+              const idValue = entry?.[motorIdKey]
+              if (idValue === undefined || idValue === null) {
+                return null
+              }
+              const idText = String(idValue).trim()
+              return (
+                <option key={`${idText}-${index}`} value={idText}>
+                  {buildMotorLabel(entry)}
+                </option>
+              )
+            })}
+          </select>
+        </label>
+
+        {!hasCatalog && (
+          <div className="empty-state" style={{ marginTop: 12 }}>
+            Motor catalog not available. Verify the backend catalogs endpoint.
+          </div>
+        )}
+
+        {hasCatalog && !selectedMotorEntry && (
+          <div className="empty-state" style={{ marginTop: 12 }}>
+            Select a motor to view plate characteristics.
+          </div>
+        )}
+
+        {selectedMotorEntry && (
+          <>
+            <div className="panel-grid">
+              <div className="panel-field">
+                <span>HP Nominal</span>
+                <strong>{formatNumericValue(pickEntryValue(selectedMotorEntry, ['HP NOM', 'hp_nom', 'HP']), 0)}</strong>
+              </div>
+              <div className="panel-field">
+                <span>Voltage Nominal</span>
+                <strong>{formatNumericValue(pickEntryValue(selectedMotorEntry, ['VOLT NOM', 'volt_nom', 'Voltaje', 'VOLT']), 0)}</strong>
+              </div>
+              <div className="panel-field">
+                <span>Current Nominal</span>
+                <strong>{formatNumericValue(pickEntryValue(selectedMotorEntry, ['AMP NOM', 'amp_nom', 'Amperaje']), 1)}</strong>
+              </div>
+              <div className="panel-field">
+                <span>Power Factor</span>
+                <strong>{formatNumericValue(pickEntryValue(selectedMotorEntry, ['COS FI NOM', 'cos_fi_nom', 'Cos Fi']), 3)}</strong>
+              </div>
+              <div className="panel-field">
+                <span>Efficiency</span>
+                <strong>
+                  {(() => {
+                    const effRaw = pickEntryValue(selectedMotorEntry, ['EFF', 'eff'])
+                    const effNumeric = Number(effRaw)
+                    if (Number.isFinite(effNumeric)) {
+                      return effNumeric <= 1.5 ? `${(effNumeric * 100).toFixed(1)} %` : `${effNumeric.toFixed(1)} %`
+                    }
+                    if (effRaw === undefined || effRaw === null || (typeof effRaw === 'string' && effRaw.trim() === '')) {
+                      return '—'
+                    }
+                    return String(effRaw)
+                  })()}
+                </strong>
+              </div>
+              <div className="panel-field">
+                <span>Frequency Nominal</span>
+                <strong>{formatNumericValue(pickEntryValue(selectedMotorEntry, ['HZ NOM', 'hz_nom', 'Hz']), 0)}</strong>
+              </div>
+              <div className="panel-field">
+                <span>Motor Type</span>
+                <strong>{pickEntryValue(selectedMotorEntry, ['Tipo Motor', 'tipo_motor', 'Tipo']) || '—'}</strong>
+              </div>
+            </div>
+            {selectedMotorEntry?.__warnings && Array.isArray(selectedMotorEntry.__warnings) && selectedMotorEntry.__warnings.length > 0 && (
+              <div className="error" style={{ marginTop: 8 }}>
+                <strong>Warnings:</strong>
+                <ul>
+                  {selectedMotorEntry.__warnings.map((warning: string, idx: number) => (
+                    <li key={`motor-warning-${idx}`}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {selectedMotorEntry?.__is_complete === false && (
+              <div className="panel-hint" style={{ marginTop: 8 }}>
+                Some motor nameplate fields are missing; electrical calculations will include warnings.
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
+
+  const renderCableConfiguration = (): React.ReactNode => {
+    const cableOptions = cableCatalog.map((entry: any, index: number) => {
+      const optionId = entry?.id ?? entry?.name ?? entry?.Tipo
+      if (optionId === undefined || optionId === null) {
+        return null
+      }
+      const valueText = String(optionId).trim()
+      const display = entry?.name || entry?.Tipo || valueText
+      return (
+        <option key={`${valueText}-${index}`} value={valueText}>
+          {display}
+        </option>
+      )
+    })
+
+    const renderCableCard = (label: string, entry: any) => (
+      <div className="panel-field" key={label}>
+        <span>{label}</span>
+        <strong>{entry ? entry.name || entry.Tipo || entry.id || '—' : '—'}</strong>
+        {entry && (
+          <div style={{ fontSize: '0.85rem', color: '#9fb7ff', fontWeight: 500 }}>
+            <div>R (20°C): {formatNumericValue(entry.r_ohm_km_20c, 4)} Ω/km</div>
+            <div>Temp coeff: {formatNumericValue(entry.temp_coeff, 5)} 1/°C</div>
+          </div>
+        )}
+      </div>
+    )
+
+    return (
+      <div className="panel-card">
+        <div className="panel-grid">
+          <label className="panel-field">
+            <span>MLE Cable Type</span>
+            <select
+              value={selectedCableMle ?? ''}
+              onChange={(event) => {
+                const nextValue = event.target.value ? event.target.value.trim() : null
+                setSelectedCableMle(nextValue)
+              }}
+            >
+              <option value="">Select cable</option>
+              {cableOptions}
+            </select>
+          </label>
+          <label className="panel-field">
+            <span>MLE Length (m)</span>
+            <input
+              type="number"
+              min={0}
+              step={10}
+              value={Number.isFinite(mleLengthMeters) ? mleLengthMeters : 0}
+              onChange={(event) => {
+                const value = Number(event.target.value)
+                setMleLengthMeters(Number.isFinite(value) && value >= 0 ? value : 0)
+              }}
+            />
+          </label>
+          <label className="panel-field">
+            <span>Downhole Cable Type</span>
+            <select
+              value={selectedCableFondo ?? ''}
+              onChange={(event) => {
+                const nextValue = event.target.value ? event.target.value.trim() : null
+                setSelectedCableFondo(nextValue)
+              }}
+            >
+              <option value="">Select cable</option>
+              {cableOptions}
+            </select>
+          </label>
+          <label className="panel-field">
+            <span>Surface Cable Type</span>
+            <select
+              value={selectedCableSuperficie ?? ''}
+              onChange={(event) => {
+                const nextValue = event.target.value ? event.target.value.trim() : null
+                setSelectedCableSuperficie(nextValue)
+              }}
+            >
+              <option value="">Select cable</option>
+              {cableOptions}
+            </select>
+          </label>
+          <label className="panel-field">
+            <span>Surface Cable Length (m)</span>
+            <input
+              type="number"
+              min={0}
+              step={10}
+              value={Number.isFinite(surfaceLengthMeters) ? surfaceLengthMeters : 0}
+              onChange={(event) => {
+                const value = Number(event.target.value)
+                setSurfaceLengthMeters(Number.isFinite(value) && value >= 0 ? value : 0)
+              }}
+            />
+          </label>
+        </div>
+
+        <div className="panel-grid" style={{ marginTop: 12 }}>
+          <label className="panel-field">
+            <span>Surface Fluid Temperature (°C)</span>
+            <input
+              type="number"
+              value={tempSuperficieGrad}
+              step={0.5}
+              onChange={(event) => {
+                const value = Number(event.target.value)
+                setTempSuperficieGrad(Number.isFinite(value) ? value : 15)
+              }}
+            />
+          </label>
+          <label className="panel-field">
+            <span>Temperature Gradient (°C/m)</span>
+            <input
+              type="number"
+              value={gradienteTemperatura}
+              step={0.001}
+              onChange={(event) => {
+                const value = Number(event.target.value)
+                setGradienteTemperatura(Number.isFinite(value) ? value : 0.0425)
+              }}
+            />
+          </label>
+          <label className="panel-field">
+            <span>Surface Ambient Temperature (°C)</span>
+            <input
+              type="number"
+              value={tempAmbienteSuperficie}
+              step={0.5}
+              onChange={(event) => {
+                const value = Number(event.target.value)
+                setTempAmbienteSuperficie(Number.isFinite(value) ? value : 25)
+              }}
+            />
+          </label>
+        </div>
+
+        {(selectedCableMleEntry || selectedCableFondoEntry || selectedCableSuperficieEntry) && (
+          <>
+            <div style={{ fontSize: '0.95rem', color: '#9fb7ff', fontWeight: 600, marginTop: 12 }}>
+              Selected Cable Properties
+            </div>
+            <div className="panel-grid">
+              {renderCableCard('MLE Cable', selectedCableMleEntry)}
+              {renderCableCard('Downhole Cable', selectedCableFondoEntry)}
+              {renderCableCard('Surface Cable', selectedCableSuperficieEntry)}
+            </div>
+          </>
+        )}
+
+        {!cableCatalog.length && (
+          <div className="empty-state" style={{ marginTop: 12 }}>
+            Cable catalog not available. Verify the backend catalogs endpoint.
+          </div>
+        )}
+      </div>
+    )
+  }
 
   const renderPumpConfiguration = (): React.ReactNode => {
     if (isComparisonMode) {
@@ -2533,6 +3150,242 @@ export default function App() {
     )
   }
 
+  const renderElectricalContent = (): React.ReactNode => {
+    if (loading && !electricalData) {
+      return <div className="empty-state">Loading electrical summary…</div>
+    }
+
+    if (!electricalData) {
+      return <div className="empty-state">Run the IPR calculation to generate the electrical summary.</div>
+    }
+
+    type MetricDef = {
+      path: string
+      label: string
+      digits?: number
+      suffix?: string
+      multiplier?: number
+      allowString?: boolean
+    }
+
+    const readValue = (source: any, path: string) => {
+      return path.split('.').reduce<any>((acc, part) => {
+        if (acc === undefined || acc === null) {
+          return undefined
+        }
+        const next = acc[part]
+        return next === undefined ? undefined : next
+      }, source)
+    }
+
+    const formatValue = (def: MetricDef, source: any) => {
+      const raw = readValue(source, def.path)
+      if (raw === undefined || raw === null) {
+        return '—'
+      }
+      if (def.allowString && typeof raw === 'string') {
+        const trimmed = raw.trim()
+        return trimmed.length ? trimmed : '—'
+      }
+      const numeric = Number(raw)
+      if (!Number.isFinite(numeric)) {
+        return '—'
+      }
+      const multiplier = def.multiplier ?? 1
+      const digits = def.digits ?? 2
+      const value = numeric * multiplier
+      return `${value.toFixed(digits)}${def.suffix || ''}`
+    }
+
+    const baseSummaryMetrics: MetricDef[] = [
+      { path: 'P_motor_kW', label: 'Motor Power', suffix: ' kW', digits: 2 },
+      { path: 'I_motor', label: 'Motor Current', suffix: ' A', digits: 2 },
+      { path: 'V_op', label: 'Motor Voltage', suffix: ' V', digits: 0 },
+      { path: 'V_superficie', label: 'Surface Voltage', suffix: ' V', digits: 0 },
+      { path: 'Motor_Load_Percent', label: 'Motor Load', suffix: ' %', digits: 1 },
+      { path: 'P_perdida_kW', label: 'Cable Losses', suffix: ' kW', digits: 3 },
+      { path: 'P_superficie_kW', label: 'Surface Power', suffix: ' kW', digits: 2 },
+      { path: 'P_superficie_kVA', label: 'Surface kVA', suffix: ' kVA', digits: 2 },
+      { path: 'PF_superficie', label: 'Power Factor', digits: 3 },
+      { path: 'Eff_Sistema', label: 'System Efficiency', suffix: ' %', digits: 1, multiplier: 100 }
+    ]
+
+    const operatingPointMetrics: MetricDef[] = [
+      { path: 'metadata.operating_point.q_m3d', label: 'Operating Flow', suffix: ' m³/d', digits: 1 },
+      { path: 'metadata.operating_point.head_m', label: 'Operating TDH', suffix: ' m', digits: 1 },
+      { path: 'metadata.operating_point.pump_bhp_hp', label: 'Pump BHP', suffix: ' hp', digits: 2 }
+    ]
+
+    const metadataMetrics: MetricDef[] = [
+      { path: 'metadata.motor_type', label: 'Motor Type', allowString: true },
+      { path: 'metadata.fef', label: 'Frequency Scaling (FEF)', digits: 2 },
+      { path: 'metadata.cable_resistance_ohm', label: 'Cable Resistance', suffix: ' Ω', digits: 4 },
+      { path: 'metadata.temps.intake', label: 'Intake Temperature', suffix: ' °C', digits: 1 },
+      { path: 'metadata.temps.superficie', label: 'Surface Temperature', suffix: ' °C', digits: 1 }
+    ]
+
+    const scenarioMetrics: MetricDef[] = [
+      { path: 'P_motor_kW', label: 'Motor Power (kW)', suffix: ' kW', digits: 2 },
+      { path: 'I_motor', label: 'Motor Current (A)', suffix: ' A', digits: 2 },
+      { path: 'Motor_Load_Percent', label: 'Motor Load (%)', suffix: ' %', digits: 1 },
+      { path: 'P_perdida_kW', label: 'Cable Losses (kW)', suffix: ' kW', digits: 3 },
+      { path: 'P_superficie_kW', label: 'Surface Power (kW)', suffix: ' kW', digits: 2 },
+      { path: 'PF_superficie', label: 'Power Factor', digits: 3 },
+      { path: 'Eff_Sistema', label: 'System Efficiency (%)', suffix: ' %', digits: 1, multiplier: 100 },
+      { path: 'metadata.operating_point.q_m3d', label: 'Operating Flow (m³/d)', suffix: ' m³/d', digits: 1 },
+      { path: 'metadata.operating_point.head_m', label: 'Operating TDH (m)', suffix: ' m', digits: 1 },
+      { path: 'metadata.operating_point.pump_bhp_hp', label: 'Pump BHP (hp)', suffix: ' hp', digits: 2 }
+    ]
+
+    const baseData = electricalData || {}
+    const baseWarnings = Array.isArray(baseData?.warnings) ? baseData.warnings : []
+
+    const scenarioKeysForTable = availableScenarioKeys.filter((key) => {
+      return Boolean(scenarioElectricalData?.[key])
+    })
+
+    const getScenarioHeaderLabel = (key: string) => {
+      const label = scenarioStyles?.[key]?.label || key
+      const overrideFreq = scenarioDisplayValues?.[key]?.freq
+      const metaFreq = scenarioMeta?.[key]?.frequency
+      const hasOverrideFreq = typeof overrideFreq === 'number' && Number.isFinite(overrideFreq)
+      const hasMetaFreq = typeof metaFreq === 'number' && Number.isFinite(metaFreq)
+      const freq = hasOverrideFreq ? overrideFreq : hasMetaFreq ? metaFreq : null
+      if (typeof freq === 'number') {
+        return `${label} (${freq.toFixed(0)} Hz)`
+      }
+      return label
+    }
+
+    const scenarioWarningEntries = scenarioKeysForTable
+      .map((key) => {
+        const warnings = scenarioElectricalData?.[key]?.warnings
+        if (!Array.isArray(warnings) || warnings.length === 0) {
+          return null
+        }
+        return { key, warnings }
+      })
+      .filter((entry): entry is { key: string; warnings: string[] } => Boolean(entry))
+
+    const hasScenarioData = scenarioKeysForTable.length > 0
+
+    return (
+      <>
+        <div className="panel-card">
+          <div className="panel-heading-row">
+            <h3 className="panel-heading">Base Electrical Summary</h3>
+          </div>
+          <div className="panel-grid">
+            {baseSummaryMetrics.map((metric) => (
+              <div key={metric.path} className="panel-field">
+                <span>{metric.label}</span>
+                <strong>{formatValue(metric, baseData)}</strong>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: '0.95rem', color: '#9fb7ff', fontWeight: 600 }}>Operating Point</div>
+          <div className="panel-grid">
+            {operatingPointMetrics.map((metric) => (
+              <div key={metric.path} className="panel-field">
+                <span>{metric.label}</span>
+                <strong>{formatValue(metric, baseData)}</strong>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: '0.95rem', color: '#9fb7ff', fontWeight: 600 }}>Motor &amp; Cable Context</div>
+          <div className="panel-grid">
+            {metadataMetrics.map((metric) => (
+              <div key={metric.path} className="panel-field">
+                <span>{metric.label}</span>
+                <strong>{formatValue(metric, baseData)}</strong>
+              </div>
+            ))}
+          </div>
+          {baseWarnings.length > 0 && (
+            <div className="error" style={{ marginTop: 4 }}>
+              <strong>Warnings:</strong>
+              <ul>
+                {baseWarnings.map((message: string, index: number) => (
+                  <li key={`electrical-warning-${index}`}>{message}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+        {hasScenarioData && (
+          <div className="panel-card sensitivity-table-card">
+            <div className="panel-heading-row">
+              <h3 className="panel-heading">Scenario Electrical Comparison</h3>
+            </div>
+            <div className="table-wrapper">
+              <table className="sensitivity-table sensitivity-table--scenario-grid">
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th style={{ color: '#dbe4ff' }}>Base</th>
+                    {scenarioKeysForTable.map((key) => (
+                      <th
+                        key={`electrical-scenario-header-${key}`}
+                        style={{ color: scenarioStyles?.[key]?.color || '#9fb7ff' }}
+                      >
+                        {getScenarioHeaderLabel(key)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {scenarioMetrics.map((metric) => (
+                    <tr key={metric.path}>
+                      <td className="metric-label">{metric.label}</td>
+                      <td className="scenario-value" style={{ color: '#dbe4ff' }}>
+                        {formatValue(metric, baseData)}
+                      </td>
+                      {scenarioKeysForTable.map((key) => (
+                        <td
+                          key={`${metric.path}-${key}`}
+                          className="scenario-value"
+                          style={{ color: scenarioStyles?.[key]?.color || '#dbe4ff' }}
+                        >
+                          {formatValue(metric, scenarioElectricalData?.[key])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        {!hasScenarioData && sensitivityEnabled && (
+          <div className="panel-card">
+            <div className="panel-heading-row">
+              <h3 className="panel-heading">Scenario Electrical Comparison</h3>
+            </div>
+            <div className="empty-state" style={{ margin: 0 }}>
+              Scenario electrical results will appear once sensitivity calculations finish.
+            </div>
+          </div>
+        )}
+        {scenarioWarningEntries.length > 0 && (
+          <div className="panel-card">
+            <div className="panel-heading-row">
+              <h3 className="panel-heading">Scenario Warnings</h3>
+            </div>
+            <ul>
+              {scenarioWarningEntries.map((entry) => (
+                entry.warnings.map((message, idx) => (
+                  <li key={`${entry.key}-warning-${idx}`}>
+                    <strong>{scenarioStyles?.[entry.key]?.label || entry.key}:</strong> {message}
+                  </li>
+                ))
+              ))}
+            </ul>
+          </div>
+        )}
+      </>
+    )
+  }
+
   const renderDemandContent = (): React.ReactNode => {
     if (!showIPR) {
       return <div className="empty-state">Enable “Show IPR” to display the system demand curve.</div>
@@ -2604,6 +3457,18 @@ export default function App() {
           <div className="config-tabs">
             <div className="config-tabs-header">
               <button
+                className={`config-tab-button ${configTab === 'motor' ? 'active' : ''}`}
+                onClick={() => setConfigTab('motor')}
+              >
+                Motor Configuration
+              </button>
+              <button
+                className={`config-tab-button ${configTab === 'cable' ? 'active' : ''}`}
+                onClick={() => setConfigTab('cable')}
+              >
+                Cable Configuration
+              </button>
+              <button
                 className={`config-tab-button ${configTab === 'pump' ? 'active' : ''}`}
                 onClick={() => setConfigTab('pump')}
               >
@@ -2623,6 +3488,8 @@ export default function App() {
               </button>
             </div>
             <div className="config-tab-body">
+              {configTab === 'motor' && renderMotorConfiguration()}
+              {configTab === 'cable' && renderCableConfiguration()}
               {configTab === 'pump' && renderPumpConfiguration()}
               {configTab === 'installation' && renderInstallationConfiguration()}
               {configTab === 'ipr' && renderIprConfiguration()}
@@ -2659,6 +3526,17 @@ export default function App() {
                 <span className="tab-icon">📐</span>
                 <span>Demand Curve</span>
               </button>
+              <button
+                className={`tab-button ${visualTab === 'electrical' ? 'active' : ''}`}
+                onClick={() => setVisualTab('electrical')}
+                disabled={!hasElectricalResults}
+                title={!hasElectricalResults
+                  ? 'Run the calculation to view electrical metrics'
+                  : undefined}
+              >
+                <span className="tab-icon">⚡</span>
+                <span>Electrical</span>
+              </button>
             </div>
             <div className="tab-content visual-tab-content">
               <div className={`tab-panel ${visualTab === 'curves' ? 'active' : ''}`}>
@@ -2669,6 +3547,9 @@ export default function App() {
               </div>
               <div className={`tab-panel ${visualTab === 'demand' ? 'active' : ''}`}>
                 {renderDemandContent()}
+              </div>
+              <div className={`tab-panel ${visualTab === 'electrical' ? 'active' : ''}`}>
+                {renderElectricalContent()}
               </div>
             </div>
           </div>

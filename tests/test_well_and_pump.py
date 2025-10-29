@@ -7,10 +7,12 @@ import equipment_selection
 def test_calculate_ipr_basic():
     well_data = {'presion_reservorio': 2000, 'pi': 1.0}
     curve = calculate_ipr(well_data)
-    assert isinstance(curve, list)
-    assert len(curve) >= 1
+    assert isinstance(curve, dict)
+    assert 'curve' in curve
+    points = curve['curve']
+    assert len(points) >= 1
     # El primer punto con q=0 debe tener pwf == presion_reservorio
-    assert curve[0]['pwf'] == 2000
+    assert points[0]['pwf'] == 2000
 
 
 def test_get_pump_performance_curves_real():

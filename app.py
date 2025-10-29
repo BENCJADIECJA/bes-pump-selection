@@ -17,6 +17,7 @@ import engineering_validation
 import tubing_catalog
 import pump_coefficients
 from pump_coefficients import PumpCoefficientError, PumpCoefficientValidationError
+import electrical_calculations
 
 app = Flask(__name__)
 # Configuramos CORS para permitir peticiones desde nuestro front-end
@@ -49,8 +50,26 @@ def calculate_conditions():
     """
     try:
         payload = request.json or {}
-        well_data = dict(payload)
-        sensitivity_overrides = well_data.pop('sensitivity_overrides', {}) or {}
+
+        configuracion_pozo = payload.get('configuracion_pozo') or {}
+        motor_config = payload.get('motor_config') or {}
+        cable_config = payload.get('cable_config') or {}
+        pump_config = payload.get('pump_config') or {}
+
+        raw_well_data = payload.get('well_data')
+        if isinstance(raw_well_data, dict):
+            well_data = deepcopy(raw_well_data)
+        else:
+            well_data = deepcopy(payload)
+            # Eliminar secciones extra agregadas en nueva especificación
+            for section_key in ('configuracion_pozo', 'motor_config', 'cable_config', 'pump_config'):
+                well_data.pop(section_key, None)
+
+        sensitivity_overrides = payload.get('sensitivity_overrides')
+        if sensitivity_overrides is None and isinstance(well_data, dict):
+            sensitivity_overrides = well_data.pop('sensitivity_overrides', {}) or {}
+        else:
+            sensitivity_overrides = sensitivity_overrides or {}
         
         # Convertir rugosidad de string a valor numérico
         if 'tubing_roughness' in well_data:
@@ -71,6 +90,13 @@ def calculate_conditions():
                 target['pwf_test'] = pwf_override
 
             return target
+
+        def parse_frequency(value, default=None):
+            try:
+                freq = float(value)
+                return freq if freq > 0 else default
+            except (TypeError, ValueError):
+                return default
 
         # 1. Calcular IPR (Aporte del pozo)
         base_well_data = deepcopy(well_data)
@@ -95,10 +121,24 @@ def calculate_conditions():
             print(f"Punto {i}: Q={point['caudal']:.1f} m3/d, TDH={point['tdh']:.2f} m, PIP={point['pip']:.2f} bar, Nivel={point.get('nivel', 'N/A')}")
         print("="*80 + "\n")
 
+        base_freq_hz = parse_frequency(pump_config.get('frequency_hz'), 50.0)
+        motor_id_selected = motor_config.get('motor_id')
+        electrical_base = electrical_calculations.calculate_electrical_summary(
+            well_data=deepcopy(base_well_data),
+            pressure_curve=pressure_demand_curve,
+            pump_config=pump_config,
+            motor_config=motor_config,
+            cable_config=cable_config,
+            configuracion_pozo=configuracion_pozo,
+            freq_hz=base_freq_hz or 50.0,
+            motor_id=motor_id_selected
+        )
+
         # 4. Construir escenarios de sensibilidad (optimista / conservador / pesimista)
         scenario_definitions = {}
         ipr_scenarios = {}
         pressure_demand_scenarios = {}
+        scenario_electrical = {}
 
         if ipr_base:
             for key in SCENARIO_ORDER:
@@ -121,20 +161,39 @@ def calculate_conditions():
                     override_data.get(field) is not None for field in ('q_test', 'pwf_test')
                 )
 
+                scenario_well_data = base_well_data
                 if has_ipr_override:
-                    scenario_input = deepcopy(well_data)
+                    scenario_input = deepcopy(base_well_data)
                     apply_override(scenario_input, override_data)
                     scenario_ipr = well_performance.calculate_ipr(deepcopy(scenario_input))
                     scenario_pressure_demand = hydraulic_calculations.calculate_pressure_demand_curve(
                         deepcopy(scenario_input),
                         scenario_ipr
                     )
+                    scenario_well_data = scenario_input
                 else:
                     scenario_ipr = deepcopy(ipr_base)
                     scenario_pressure_demand = deepcopy(pressure_demand_curve)
 
-                ipr_scenarios[key] = scenario_ipr
+                scenario_freq = parse_frequency(override_data.get('frequency_hz'), base_freq_hz)
+                scenario_electrical_data = electrical_calculations.calculate_electrical_summary(
+                    well_data=deepcopy(scenario_well_data),
+                    pressure_curve=scenario_pressure_demand,
+                    pump_config=pump_config,
+                    motor_config=motor_config,
+                    cable_config=cable_config,
+                    configuracion_pozo=configuracion_pozo,
+                    freq_hz=scenario_freq or base_freq_hz or 50.0,
+                    motor_id=motor_id_selected
+                )
+
+                ipr_scenarios[key] = {
+                    'ipr': scenario_ipr,
+                    'pressure_demand_curve': scenario_pressure_demand,
+                    'electrical_data': scenario_electrical_data
+                }
                 pressure_demand_scenarios[key] = scenario_pressure_demand
+                scenario_electrical[key] = scenario_electrical_data
 
         # 5. Aplicar correcciones por gas si es necesario
         gas_corrections = gas_effects.get_gas_corrections(well_data)
@@ -144,9 +203,11 @@ def calculate_conditions():
             "ipr_data": ipr_base,
             "system_head_curve": system_head_curve,
             "pressure_demand_curve": pressure_demand_curve,
+            "electrical_data": electrical_base,
             "gas_corrections": gas_corrections,
             "ipr_scenarios": ipr_scenarios,
             "pressure_demand_scenarios": pressure_demand_scenarios,
+            "electrical_scenarios": scenario_electrical,
             "scenario_definitions": scenario_definitions,
             "scenario_order": SCENARIO_ORDER
         }), 200
@@ -205,13 +266,15 @@ def get_catalogs():
     try:
         pumps = equipment_selection.get_pump_catalog()
         motors = equipment_selection.get_motor_catalog()
+        cables = equipment_selection.get_cable_catalog()
         # ... otros catálogos (cables, protectores, etc.)
 
         return jsonify({
             "success": True,
             "catalogs": {
                 "pumps": pumps,
-                "motors": motors
+                "motors": motors,
+                "cables": cables
             }
         }), 200
     
@@ -237,7 +300,6 @@ def list_pumps():
         return jsonify(pumps), 200
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
-
 
 @app.route('/api/pumps/<pump_id>/curves', methods=['GET'])
 def pump_curves(pump_id):
@@ -313,6 +375,18 @@ def pump_curves(pump_id):
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/catalogos/cables', methods=['GET'])
+def get_power_cable_catalog():
+    """Devuelve el catálogo de cables de potencia."""
+    try:
+        cables = equipment_selection.get_cable_catalog()
+        return jsonify({"cables": cables}), 200
+    except FileNotFoundError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @app.route('/api/tubing-catalog', methods=['GET'])

@@ -304,7 +304,9 @@ def calculate_pressure_demand_curve(well_data, ipr_data=None):
         pressure_curve.append({
             "caudal": round(q, 2),
             "tdh": round(tdh, 2),  # m (TDH que debe dar la bomba)
+            "head_requerido": round(tdh, 2),  # Alias para compatibilidad
             "pip": round(pip_bar, 2),  # bar (Presión de entrada = Pwf + Pcasing)
+            "p_intake": round(pip_bar, 2),  # Alias para compatibilidad
             "pwf": round(pwf_bar, 2),  # bar (Presión de fondo fluyente del IPR)
             "nivel": round(nivel_dinamico, 2),  # m (Nivel dinámico del fluido)
             "perdidas_friccion": round(tf_bar, 2),  # bar
@@ -317,6 +319,8 @@ def calculate_pressure_demand_curve(well_data, ipr_data=None):
         'components': {
             'p_surface_target': presion_superficie,
             'profundidad_bomba': profundidad_bomba,
+            'profundidad_intake': profundidad_bomba,
+            'nivel_fluido': well_data.get('nivel_fluido_dinamico'),
             'gradiente': round(gradiente, 5),
             'p_casing': presion_casing
         }

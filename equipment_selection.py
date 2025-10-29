@@ -2,8 +2,19 @@
 # Módulo de Gestión de Catálogos de Equipos
 # -----------------------------------------
 
+import json
+import logging
+import os
+from typing import Dict, Optional
+
+import numpy as np  # Importamos numpy para manejo de tipos
 import pandas as pd
-import numpy as np # Importamos numpy para manejo de tipos
+
+# Conversión de unidades para potencia de la bomba
+KW_TO_HP = 1.34102209
+ASYNC_SLIP_FACTOR = 2790 / 3000
+
+logger = logging.getLogger(__name__)
 
 # =================================================================
 # --- CONFIGURACION DE CATALOGOS ---
@@ -16,6 +27,27 @@ EXCEL_FILE_NAME = 'coeficientes NOVOMET.xlsx'
 # Podemos intentar varias alternativas (el archivo real usa 'BOMBA' y 'MOTOR')
 PUMP_SHEET_CANDIDATES = ['Bombas', 'BOMBA', 'Bomba', 'Bombas ']
 MOTOR_SHEET_CANDIDATES = ['Motor', 'MOTOR', 'Motor ', 'MOTOR']
+
+CABLE_CATALOG_PATH = os.path.join('data', 'cable_catalog.json')
+
+REQUIRED_MOTOR_COLUMNS = [
+    'descripción',
+    'HP NOM',
+    'VOLT NOM',
+    'AMP NOM',
+    'COS FI NOM',
+    'EFF',
+    'HZ NOM',
+    'Tipo Motor'
+]
+
+MOTOR_COMPLETENESS_COLUMNS = [
+    'Tipo Motor',
+    'COS FI NOM',
+    'EFF',
+    'HP NOM',
+    'HZ NOM'
+]
 
 def find_sheet_name(xls, candidates):
     """Devuelve el nombre de hoja existente a partir de una lista de candidatos (case-insensitive)."""
@@ -78,8 +110,11 @@ MOTOR_VOLTAGE_CANDIDATES = ['VOLT NOM', 'VOLT', 'voltaje', 'VOLTAGE']
 # --- Variables Globales ---
 PUMP_CATALOG = None
 MOTOR_CATALOG = None
+CABLE_CATALOG = None
 PUMP_SHEET_NAME = None
 MOTOR_SHEET_NAME = None
+
+MOTOR_COLUMN_MAP: Dict[str, str] = {}
 
 # Variables de columna (valores por defecto para compatibilidad)
 COL_PUMP_ID = 'Tipo'
@@ -100,6 +135,61 @@ def pick_column(columns, candidates, default=None):
             return cols_lower[cand.lower()]
     return default
 
+
+def _normalize_key(value: str) -> str:
+    """Normaliza un nombre de columna para comparación flexible."""
+    if not isinstance(value, str):
+        return ''
+    return value.strip().lower()
+
+
+def _build_required_column_map(df: pd.DataFrame, required: list[str]) -> Dict[str, str]:
+    """Mapea los encabezados requeridos a las columnas reales del DataFrame."""
+    normalized = {_normalize_key(col): col for col in df.columns}
+    missing = []
+    mapping: Dict[str, str] = {}
+
+    for header in required:
+        key = _normalize_key(header)
+        actual = normalized.get(key)
+        if not actual:
+            missing.append(header)
+            continue
+        mapping[header] = actual
+
+    if missing:
+        raise KeyError(
+            "Columnas requeridas ausentes en catálogo de motores: " + ", ".join(missing)
+        )
+
+    return mapping
+
+
+def _is_missing(value) -> bool:
+    """Evalúa si un valor debe considerarse faltante."""
+    if value is None:
+        return True
+    if isinstance(value, float) and np.isnan(value):
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    return False
+
+
+def _to_float(value) -> Optional[float]:
+    """Intenta convertir un valor a float, devolviendo None si falla."""
+    try:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            candidate = value.strip().replace(',', '.')
+            if not candidate:
+                return None
+            return float(candidate)
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
 def calculate_polynomial(coeffs, q):
     """
     Calcula el valor de un polinomio para un 'q' dado.
@@ -111,11 +201,32 @@ def calculate_polynomial(coeffs, q):
         total += c * (q ** i)
     return total
 
+def load_cable_catalog(force: bool = False):
+    """Carga el catálogo de cables desde disco."""
+    global CABLE_CATALOG
+
+    if CABLE_CATALOG is not None and not force:
+        return
+
+    if not os.path.exists(CABLE_CATALOG_PATH):
+        raise FileNotFoundError(
+            f"No se encontró el archivo de catálogo de cables en '{CABLE_CATALOG_PATH}'"
+        )
+
+    with open(CABLE_CATALOG_PATH, 'r', encoding='utf-8') as fh:
+        data = json.load(fh)
+
+    if not isinstance(data, list):
+        raise ValueError('El catálogo de cables debe ser un array JSON.')
+
+    CABLE_CATALOG = data
+
+
 def load_catalogs():
     """
     Carga los catálogos de equipos (bombas, motores) desde un archivo Excel.
     """
-    global PUMP_CATALOG, MOTOR_CATALOG, PUMP_SHEET_NAME, MOTOR_SHEET_NAME
+    global PUMP_CATALOG, MOTOR_CATALOG, PUMP_SHEET_NAME, MOTOR_SHEET_NAME, MOTOR_COLUMN_MAP
 
     try:
         print(f"Intentando cargar '{EXCEL_FILE_NAME}'...")
@@ -126,12 +237,41 @@ def load_catalogs():
         MOTOR_SHEET_NAME = motor_sheet
         print(f"  Hoja detectada para bombas: '{pump_sheet}'")
         print(f"  Hoja detectada para motores: '{motor_sheet}'")
+
         PUMP_CATALOG = pd.read_excel(EXCEL_FILE_NAME, sheet_name=pump_sheet)
         MOTOR_CATALOG = pd.read_excel(EXCEL_FILE_NAME, sheet_name=motor_sheet)
 
         # --- LIMPIEZA DE DATOS ---
         PUMP_CATALOG = PUMP_CATALOG.replace({np.nan: None})
         MOTOR_CATALOG = MOTOR_CATALOG.replace({np.nan: None})
+
+        # Validar columnas obligatorias de motor
+        column_map = _build_required_column_map(MOTOR_CATALOG, REQUIRED_MOTOR_COLUMNS)
+        MOTOR_COLUMN_MAP = {
+            'descripcion': column_map['descripción'],
+            'hp_nom': column_map['HP NOM'],
+            'volt_nom': column_map['VOLT NOM'],
+            'amp_nom': column_map['AMP NOM'],
+            'cos_fi_nom': column_map['COS FI NOM'],
+            'eff': column_map['EFF'],
+            'hz_nom': column_map['HZ NOM'],
+            'tipo_motor': column_map['Tipo Motor']
+        }
+
+        def mark_row_completeness(row):
+            motor_id_value = row.get(column_map['descripción'])
+            for header in MOTOR_COMPLETENESS_COLUMNS:
+                col = column_map[header]
+                if _is_missing(row.get(col)):
+                    logger.warning(
+                        "Motor '%s' con datos incompletos: falta valor en columna '%s'",
+                        motor_id_value,
+                        header
+                    )
+                    return False
+            return True
+
+        MOTOR_CATALOG['__is_complete'] = MOTOR_CATALOG.apply(mark_row_completeness, axis=1)
 
         # --- MAPEO DINÁMICO DE COLUMNAS ---
         global COL_PUMP_ID, COL_PUMP_MIN_Q, COL_PUMP_MAX_Q
@@ -198,7 +338,6 @@ def load_catalogs():
                 'motor_amps_col': COL_MOTOR_AMPS,
                 'motor_voltage_col': COL_MOTOR_VOLTAGE
             }
-            import os, json
             os.makedirs('data', exist_ok=True)
             with open(os.path.join('data', 'column_mapping.json'), 'w', encoding='utf-8') as fh:
                 json.dump(mapping, fh, ensure_ascii=False, indent=2)
@@ -217,6 +356,9 @@ def load_catalogs():
     # debe estar presente y correctamente formado. Si la lectura falla, se levantará
     # una excepción para que el fallo sea evidente durante el desarrollo y despliegue.
 
+    # Cargar catálogo de cables en memoria para mantener consistencia al iniciar la app.
+    load_cable_catalog()
+
 
 def get_pump_catalog():
     """Devuelve el catálogo completo de bombas."""
@@ -229,6 +371,77 @@ def get_motor_catalog():
     if MOTOR_CATALOG is None:
         load_catalogs()
     return MOTOR_CATALOG.to_dict(orient='records')
+
+
+def get_cable_catalog():
+    """Devuelve el catálogo completo de cables."""
+    if CABLE_CATALOG is None:
+        load_cable_catalog()
+    return list(CABLE_CATALOG)
+
+
+def get_motor_specs(motor_id: str) -> Optional[dict]:
+    """Obtiene los datos de placa de un motor específico."""
+    if not motor_id:
+        return None
+
+    if MOTOR_CATALOG is None or not MOTOR_COLUMN_MAP:
+        load_catalogs()
+
+    catalog = MOTOR_CATALOG
+    id_column = MOTOR_COLUMN_MAP.get('descripcion') or COL_MOTOR_ID
+
+    try:
+        series = catalog[id_column]
+    except KeyError:
+        return None
+
+    target = str(motor_id).strip()
+    if not target:
+        return None
+
+    normalized_series = series.astype(str).str.strip().str.casefold()
+    target_normalized = target.casefold()
+    matches = catalog[normalized_series == target_normalized]
+
+    if matches.empty:
+        return None
+
+    row = matches.iloc[0]
+
+    tipo = row.get(MOTOR_COLUMN_MAP.get('tipo_motor'))
+    if isinstance(tipo, str):
+        tipo_normalized = tipo.strip().upper()
+    else:
+        tipo_normalized = tipo
+
+    specs = {
+        'id': row.get(id_column),
+        'hp_nom': _to_float(row.get(MOTOR_COLUMN_MAP.get('hp_nom'))),
+        'volt_nom': _to_float(row.get(MOTOR_COLUMN_MAP.get('volt_nom'))),
+        'amp_nom': _to_float(row.get(MOTOR_COLUMN_MAP.get('amp_nom'))),
+        'cos_fi_nom': _to_float(row.get(MOTOR_COLUMN_MAP.get('cos_fi_nom'))),
+        'eff': _to_float(row.get(MOTOR_COLUMN_MAP.get('eff'))),
+        'hz_nom': _to_float(row.get(MOTOR_COLUMN_MAP.get('hz_nom'))),
+        'tipo_motor': tipo_normalized,
+        'is_complete': bool(row.get('__is_complete', True))
+    }
+
+    return specs
+
+
+def get_cable_specs(cable_id: str) -> Optional[dict]:
+    """Obtiene las propiedades de un cable por ID."""
+    if not cable_id:
+        return None
+
+    if CABLE_CATALOG is None:
+        load_cable_catalog()
+
+    for entry in CABLE_CATALOG:
+        if entry.get('id') == cable_id:
+            return entry
+    return None
 
 
 def get_column_mapping():
@@ -271,7 +484,13 @@ def get_catalog_excel_path():
 def refresh_catalogs():
     load_catalogs()
 
-def get_pump_performance_curves(pump_id, freq_hz: float = 50.0, stages: int = 300, n_points: int = 300):
+def get_pump_performance_curves(
+    pump_id,
+    freq_hz: float = 50.0,
+    stages: int = 300,
+    n_points: int = 21,
+    motor_id: Optional[str] = None
+):
     """
     Calcula las curvas de rendimiento (TDH, BHP, Eff) para una bomba específica
     usando sus coeficientes polinómicos.
@@ -307,7 +526,7 @@ def get_pump_performance_curves(pump_id, freq_hz: float = 50.0, stages: int = 30
         return {"error": f"Configuración incorrecta: Columna {e} no encontrada."}
     
     # --- LÓGICA DE CÁLCULO REAL (Polinomios de alto grado) ---
-    
+
     # Detectar RPM nominal de catálogo una sola vez
     rpm_cat = None
     try:
@@ -319,15 +538,32 @@ def get_pump_performance_curves(pump_id, freq_hz: float = 50.0, stages: int = 30
     except Exception:
         rpm_cat = None
 
-    # RPM operativo (Hz * 60)
-    rpm_oper = float(freq_hz) * 60.0 if freq_hz is not None else None
-    
-    # Factor de velocidad para caudal (Q es proporcional a la velocidad)
-    if rpm_oper and rpm_cat and rpm_cat > 0:
-        speed_factor_q = rpm_oper / float(rpm_cat)
-    else:
-        # Si no hay información de rpm, asumimos factor 1
-        speed_factor_q = 1.0
+    rpm_synchronous = float(freq_hz) * 60.0 if freq_hz is not None else None
+
+    motor_specs = get_motor_specs(motor_id) if motor_id else None
+    rpm_real_motor = rpm_synchronous
+
+    if motor_specs and rpm_synchronous is not None:
+        motor_type = (motor_specs.get('tipo_motor') or '').upper() if motor_specs.get('tipo_motor') else ''
+        if motor_type == 'PM':
+            rpm_real_motor = rpm_synchronous
+        elif motor_type == 'AM':
+            rpm_real_motor = rpm_synchronous * ASYNC_SLIP_FACTOR
+        else:
+            rpm_real_motor = rpm_synchronous
+
+    speed_ratio = None
+    if rpm_real_motor and rpm_cat:
+        try:
+            rpm_cat_value = float(rpm_cat)
+            if rpm_cat_value > 0:
+                speed_ratio = rpm_real_motor / rpm_cat_value
+        except (TypeError, ValueError):
+            speed_ratio = None
+
+    speed_factor_q = speed_ratio if speed_ratio is not None else 1.0
+    speed_factor_head = (speed_ratio ** 2) if speed_ratio is not None else 1.0
+    speed_factor_power = (speed_ratio ** 3) if speed_ratio is not None else 1.0
     
     # Devolvemos las curvas escaladas (compatibilidad hacia atrás) y
     # también las versiones "raw" (polinomio sin escalar) para trazabilidad.
@@ -341,26 +577,16 @@ def get_pump_performance_curves(pump_id, freq_hz: float = 50.0, stages: int = 30
 
         # Factor por etapas y por velocidad^2
         stage_factor = float(stages) if stages is not None else 1.0
-        if rpm_oper and rpm_cat and rpm_cat > 0:
-            speed_factor = (rpm_oper / float(rpm_cat)) ** 2
-        else:
-            # Si no hay información de rpm, asumimos factor 1 y avisamos
-            speed_factor = 1.0
-
-        return base_h * stage_factor * speed_factor
+        return base_h * stage_factor * speed_factor_head
     
     def poly_bhp(q):
         # P = C0 + C1*Q + C2*Q^2 + ... + C9*Q^9
         base_p = calculate_polynomial(p_coeffs, q)
 
         stage_factor = float(stages) if stages is not None else 1.0
-        if rpm_oper and rpm_cat and rpm_cat > 0:
-            speed_factor_p = (rpm_oper / float(rpm_cat)) ** 3
-        else:
-            speed_factor_p = 1.0
 
         # Aplicar escalado por etapas y afinidad (velocidad^3)
-        scaled_p = base_p * stage_factor * speed_factor_p
+        scaled_p = base_p * stage_factor * speed_factor_power
 
         # Conversión final a HP: según indicación, multiplicar por 1.34 y dividir por 1000
         # (se mantiene 'base_p' como raw para trazabilidad)
@@ -416,12 +642,10 @@ def get_pump_performance_curves(pump_id, freq_hz: float = 50.0, stages: int = 30
         base_p = calculate_polynomial(p_coeffs, q_base)
 
         # Valores escalados (las funciones aplican etapas/factor según parámetros)
-        head_val = poly_head(q_base)
-        bhp_val = poly_bhp(q_base)  # returned in HP
-
-        # Si el TDH es negativo, detener la generación de puntos
-        if head_val < 0:
-            break
+        head_val_raw = poly_head(q_base)
+        head_val = head_val_raw if head_val_raw >= 0 else 0.0
+        bhp_val_raw = poly_bhp(q_base)  # returned in HP
+        bhp_val = bhp_val_raw if bhp_val_raw >= 0 else 0.0
 
         # Calculamos eficiencia usando la fórmula solicitada
         # efficiency (escalada) usando TDH escalada y PBHP en HP
