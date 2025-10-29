@@ -309,8 +309,15 @@ def pump_curves(pump_id):
         stages = int(request.args.get('stages', 300))
         points = int(request.args.get('points', 300))
         plot = request.args.get('plot', '0') in ('1', 'true', 'True')
+        motor_id = request.args.get('motor_id')
 
-        curves = equipment_selection.get_pump_performance_curves(pump_id, freq_hz=freq, stages=stages, n_points=points)
+        curves = equipment_selection.get_pump_performance_curves(
+            pump_id,
+            freq_hz=freq,
+            stages=stages,
+            n_points=points,
+            motor_id=motor_id
+        )
         if isinstance(curves, dict) and 'error' in curves:
             return jsonify({"success": False, "error": curves['error']}), 404
 

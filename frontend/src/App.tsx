@@ -160,7 +160,7 @@ export default function App() {
   const [numPumpsToCompare, setNumPumpsToCompare] = useState(2)
   const [curveTypeToCompare, setCurveTypeToCompare] = useState<'head' | 'bhp' | 'efficiency'>('head')
   
-  // Estados para cada bomba en el comparador (hasta 3 bombas)
+  // Estados para cada bomba en el comparador (hasta 5 bombas)
   const [pump1, setPump1] = useState<string | null>(null)
   const [pump1Freq, setPump1Freq] = useState(50)
   const [pump1Stages, setPump1Stages] = useState(300)
@@ -178,6 +178,18 @@ export default function App() {
   const [pump3Stages, setPump3Stages] = useState(300)
   const [pump3MultiFreq, setPump3MultiFreq] = useState(false)
   const [pump3Curves, setPump3Curves] = useState<any>(null)
+
+  const [pump4, setPump4] = useState<string | null>(null)
+  const [pump4Freq, setPump4Freq] = useState(50)
+  const [pump4Stages, setPump4Stages] = useState(300)
+  const [pump4MultiFreq, setPump4MultiFreq] = useState(false)
+  const [pump4Curves, setPump4Curves] = useState<any>(null)
+
+  const [pump5, setPump5] = useState<string | null>(null)
+  const [pump5Freq, setPump5Freq] = useState(50)
+  const [pump5Stages, setPump5Stages] = useState(300)
+  const [pump5MultiFreq, setPump5MultiFreq] = useState(false)
+  const [pump5Curves, setPump5Curves] = useState<any>(null)
 
   // Estados para IPR (Inflow Performance Relationship) - UNIDADES MÉTRICAS
   const [showIPR, setShowIPR] = useState(false)
@@ -663,7 +675,8 @@ export default function App() {
               return { scenarioKey, curves, frequency: targetFrequency }
             }
 
-            const url = `/api/pumps/${encodeURIComponent(selected)}/curves?freq=${targetFrequency}&stages=${stages}&points=${points}`
+            const motorQuery = selectedMotorId ? `&motor_id=${encodeURIComponent(selectedMotorId)}` : ''
+            const url = `/api/pumps/${encodeURIComponent(selected)}/curves?freq=${targetFrequency}&stages=${stages}&points=${points}${motorQuery}`
             const response = await axios.get(url, { signal: controller.signal })
             const payload = response.data || {}
             const curvePayload = payload.curves || payload
@@ -716,7 +729,8 @@ export default function App() {
     freq,
     curves,
     stages,
-    points
+    points,
+    selectedMotorId
   ])
 
   const scenarioOperatingSummary = useMemo(() => {
@@ -1237,7 +1251,8 @@ export default function App() {
     setLoading(true)
     setError(null)
     try {
-      const res = await axios.get(`/api/pumps/${encodeURIComponent(selected)}/curves?freq=${freq}&stages=${stages}&points=${points}`)
+      const motorQuery = selectedMotorId ? `&motor_id=${encodeURIComponent(selectedMotorId)}` : ''
+      const res = await axios.get(`/api/pumps/${encodeURIComponent(selected)}/curves?freq=${freq}&stages=${stages}&points=${points}${motorQuery}`)
       const payload = res.data || {}
       if (payload.success === false) {
         setError(payload.error || 'Error from server')
@@ -1265,8 +1280,9 @@ export default function App() {
         frequencies.push(minFreq + step * i)
       }
 
+      const motorQuery = selectedMotorId ? `&motor_id=${encodeURIComponent(selectedMotorId)}` : ''
       const promises = frequencies.map(f => 
-        axios.get(`/api/pumps/${encodeURIComponent(selected)}/curves?freq=${f}&stages=${stages}&points=${points}`)
+        axios.get(`/api/pumps/${encodeURIComponent(selected)}/curves?freq=${f}&stages=${stages}&points=${points}${motorQuery}`)
       )
       
       const results = await Promise.all(promises)
@@ -1303,8 +1319,9 @@ export default function App() {
       }
       
       // Obtener curvas de cada bomba
+      const motorQuery = selectedMotorId ? `&motor_id=${encodeURIComponent(selectedMotorId)}` : ''
       const promises = selectedPumps.map(pump =>
-        axios.get(`/api/pumps/${encodeURIComponent(pump.id!)}/curves?freq=${freq}&stages=${pump.stages}&points=${points}`)
+        axios.get(`/api/pumps/${encodeURIComponent(pump.id!)}/curves?freq=${freq}&stages=${pump.stages}&points=${points}${motorQuery}`)
       )
       
       const results = await Promise.all(promises)
@@ -1400,8 +1417,9 @@ export default function App() {
           frequencies.push(minFreq + step * i)
         }
         
+        const motorQuery = selectedMotorId ? `&motor_id=${encodeURIComponent(selectedMotorId)}` : ''
         const promises = frequencies.map(f =>
-          axios.get(`/api/pumps/${encodeURIComponent(pumpId)}/curves?freq=${f}&stages=${stagesCount}&points=${points}`)
+          axios.get(`/api/pumps/${encodeURIComponent(pumpId)}/curves?freq=${f}&stages=${stagesCount}&points=${points}${motorQuery}`)
         )
         
         const results = await Promise.all(promises)
@@ -1415,7 +1433,8 @@ export default function App() {
         setPumpCurves(curvesData)
       } else {
         // Modo frecuencia única para esta bomba
-        const res = await axios.get(`/api/pumps/${encodeURIComponent(pumpId)}/curves?freq=${frequency}&stages=${stagesCount}&points=${points}`)
+        const motorQuery = selectedMotorId ? `&motor_id=${encodeURIComponent(selectedMotorId)}` : ''
+        const res = await axios.get(`/api/pumps/${encodeURIComponent(pumpId)}/curves?freq=${frequency}&stages=${stagesCount}&points=${points}${motorQuery}`)
         const payload = res.data || {}
         setPumpCurves(payload.curves || payload)
       }
@@ -1699,6 +1718,7 @@ export default function App() {
     tubingRoughness,
     // Parámetros eléctricos y selección de motor/cable
     freq,
+    stages,
     selectedMotorId,
     selectedCableMle,
     selectedCableFondo,
@@ -1710,6 +1730,7 @@ export default function App() {
     tempAmbienteSuperficie,
     // IMPORTANTE: Recalcular cuando cambia el número de bombas
     numPumpsDesign,
+    designPumps,
     scenarioOverridesForIprSignature
   ])
   
@@ -1729,15 +1750,24 @@ export default function App() {
     if (numPumpsToCompare >= 3 && pump3) {
       promises.push(fetchPumpCurves(pump3, pump3Freq, pump3Stages, pump3MultiFreq, setPump3Curves))
     }
+    if (numPumpsToCompare >= 4 && pump4) {
+      promises.push(fetchPumpCurves(pump4, pump4Freq, pump4Stages, pump4MultiFreq, setPump4Curves))
+    }
+    if (numPumpsToCompare >= 5 && pump5) {
+      promises.push(fetchPumpCurves(pump5, pump5Freq, pump5Stages, pump5MultiFreq, setPump5Curves))
+    }
     
     Promise.all(promises).finally(() => setLoading(false))
   }, [
     isComparisonMode,
     pump1, pump1Freq, pump1Stages, pump1MultiFreq,
     pump2, pump2Freq, pump2Stages, pump2MultiFreq,
-    pump3, pump3Freq, pump3Stages, pump3MultiFreq,
-    numPumpsToCompare,
-    points, minFreq, maxFreq, numCurves
+  pump3, pump3Freq, pump3Stages, pump3MultiFreq,
+  pump4, pump4Freq, pump4Stages, pump4MultiFreq,
+  pump5, pump5Freq, pump5Stages, pump5MultiFreq,
+  numPumpsToCompare,
+    points, minFreq, maxFreq, numCurves,
+    selectedMotorId
   ])
 
   // Auto-fetch curves when pump, frequency, stages, or points change
@@ -1749,14 +1779,14 @@ export default function App() {
         fetchCurves()
       }
     }
-  }, [selected, freq, stages, points, isMultiFreq, minFreq, maxFreq, numCurves])
+  }, [selected, freq, stages, points, isMultiFreq, minFreq, maxFreq, numCurves, selectedMotorId])
 
   // Auto-fetch combined curves in design mode
   useEffect(() => {
     if (!isComparisonMode && numPumpsDesign > 1) {
       fetchCombinedCurves()
     }
-  }, [numPumpsDesign, designPumps, freq, points, isComparisonMode])
+  }, [numPumpsDesign, designPumps, freq, points, isComparisonMode, selectedMotorId])
 
   useEffect(() => {
     if (!showIPR) {
@@ -1955,118 +1985,137 @@ export default function App() {
             <select value={numPumpsToCompare} onChange={(event) => setNumPumpsToCompare(Number(event.target.value))}>
               <option value={2}>2 Pumps</option>
               <option value={3}>3 Pumps</option>
+              <option value={4}>4 Pumps</option>
+              <option value={5}>5 Pumps</option>
             </select>
           </label>
         </div>
       </div>
-        <div className="panel-card">
+      <div className="panel-card">
         <h3 className="panel-heading">Pump Parameters</h3>
-        <div className="pump-card-grid pump-card-grid--comparison">
-          {[1, 2, 3].slice(0, numPumpsToCompare).map((num) => {
-            const pumpState =
-              num === 1
-                ? { pump: pump1, setPump: setPump1, freq: pump1Freq, setFreq: setPump1Freq, stages: pump1Stages, setStages: setPump1Stages, multiFreq: pump1MultiFreq, setMultiFreq: setPump1MultiFreq }
-                : num === 2
-                ? { pump: pump2, setPump: setPump2, freq: pump2Freq, setFreq: setPump2Freq, stages: pump2Stages, setStages: setPump2Stages, multiFreq: pump2MultiFreq, setMultiFreq: setPump2MultiFreq }
-                : { pump: pump3, setPump: setPump3, freq: pump3Freq, setFreq: setPump3Freq, stages: pump3Stages, setStages: setPump3Stages, multiFreq: pump3MultiFreq, setMultiFreq: setPump3MultiFreq }
+        {(() => {
+          const pumpConfigs = [
+            { pump: pump1, setPump: setPump1, freq: pump1Freq, setFreq: setPump1Freq, stages: pump1Stages, setStages: setPump1Stages, multiFreq: pump1MultiFreq, setMultiFreq: setPump1MultiFreq },
+            { pump: pump2, setPump: setPump2, freq: pump2Freq, setFreq: setPump2Freq, stages: pump2Stages, setStages: setPump2Stages, multiFreq: pump2MultiFreq, setMultiFreq: setPump2MultiFreq },
+            { pump: pump3, setPump: setPump3, freq: pump3Freq, setFreq: setPump3Freq, stages: pump3Stages, setStages: setPump3Stages, multiFreq: pump3MultiFreq, setMultiFreq: setPump3MultiFreq },
+            { pump: pump4, setPump: setPump4, freq: pump4Freq, setFreq: setPump4Freq, stages: pump4Stages, setStages: setPump4Stages, multiFreq: pump4MultiFreq, setMultiFreq: setPump4MultiFreq },
+            { pump: pump5, setPump: setPump5, freq: pump5Freq, setFreq: setPump5Freq, stages: pump5Stages, setStages: setPump5Stages, multiFreq: pump5MultiFreq, setMultiFreq: setPump5MultiFreq }
+          ]
+          const activePumpConfigs = pumpConfigs.slice(0, numPumpsToCompare)
 
-            return (
-              <div key={`comparison-pump-${num}`} className="pump-card pump-card--comparison">
-                <h4 className="pump-card__title pump-card__title--centered">Pump {num}</h4>
-                <label className="pump-card__field">
-                  <span className="pump-card__label">Select Pump</span>
-                  <select
-                    className="pump-card__control"
-                    value={pumpState.pump || ''}
-                    onChange={(event) => pumpState.setPump(event.target.value || null)}
-                  >
-                    <option value="">-- Select --</option>
-                    {pumps.map((pumpId) => (
-                      <option key={pumpId} value={pumpId}>
-                        {pumpId}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="checkbox-label pump-card__toggle">
-                  <input
-                    type="checkbox"
-                    checked={pumpState.multiFreq}
-                    onChange={(event) => pumpState.setMultiFreq(event.target.checked)}
-                  />
-                  <span>Multi-Frequency Mode</span>
-                </label>
-                {!pumpState.multiFreq && (
+          return (
+            <div className="pump-card-grid pump-card-grid--comparison">
+              {activePumpConfigs.map((pumpState, index) => (
+                <div key={`comparison-pump-${index + 1}`} className="pump-card pump-card--comparison">
+                  <h4 className="pump-card__title pump-card__title--centered">Pump {index + 1}</h4>
                   <label className="pump-card__field">
-                    <span className="pump-card__label">Frequency (Hz)</span>
+                    <span className="pump-card__label">Select Pump</span>
+                    <select
+                      className="pump-card__control"
+                      value={pumpState.pump || ''}
+                      onChange={(event) => pumpState.setPump(event.target.value || null)}
+                    >
+                      <option value="">-- Select --</option>
+                      {pumps.map((pumpId) => (
+                        <option key={pumpId} value={pumpId}>
+                          {pumpId}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="checkbox-label pump-card__toggle">
+                    <input
+                      type="checkbox"
+                      checked={pumpState.multiFreq}
+                      onChange={(event) => pumpState.setMultiFreq(event.target.checked)}
+                    />
+                    <span>Multi-Frequency Mode</span>
+                  </label>
+                  {!pumpState.multiFreq && (
+                    <label className="pump-card__field">
+                      <span className="pump-card__label">Frequency (Hz)</span>
+                      <input
+                        className="pump-card__control"
+                        type="number"
+                        value={pumpState.freq}
+                        onChange={(event) => pumpState.setFreq(Number(event.target.value))}
+                        min={30}
+                        max={70}
+                        step={0.1}
+                      />
+                    </label>
+                  )}
+                  <label className="pump-card__field">
+                    <span className="pump-card__label">Stages</span>
                     <input
                       className="pump-card__control"
                       type="number"
-                      value={pumpState.freq}
-                      onChange={(event) => pumpState.setFreq(Number(event.target.value))}
-                      min={30}
-                      max={70}
-                      step={0.1}
+                      value={pumpState.stages}
+                      onChange={(event) => pumpState.setStages(Number(event.target.value))}
+                      min={1}
+                      max={500}
+                      step={1}
                     />
                   </label>
-                )}
-                <label className="pump-card__field">
-                  <span className="pump-card__label">Stages</span>
-                  <input
-                    className="pump-card__control"
-                    type="number"
-                    value={pumpState.stages}
-                    onChange={(event) => pumpState.setStages(Number(event.target.value))}
-                    min={1}
-                    max={500}
-                    step={1}
-                  />
-                </label>
-              </div>
-            )
-          })}
-        </div>
+                </div>
+              ))}
+            </div>
+          )
+        })()}
       </div>
-      {(pump1MultiFreq || pump2MultiFreq || (numPumpsToCompare >= 3 && pump3MultiFreq)) && (
-        <div className="panel-card">
-          <h3 className="panel-heading">Multi-Frequency Settings</h3>
-          <div className="panel-grid">
-            <label className="panel-field">
-              <span>Min Frequency (Hz)</span>
-              <input
-                type="number"
-                value={minFreq}
-                onChange={(event) => setMinFreq(Number(event.target.value))}
-                min={30}
-                max={60}
-                step={1}
-              />
-            </label>
-            <label className="panel-field">
-              <span>Max Frequency (Hz)</span>
-              <input
-                type="number"
-                value={maxFreq}
-                onChange={(event) => setMaxFreq(Number(event.target.value))}
-                min={40}
-                max={70}
-                step={1}
-              />
-            </label>
-            <label className="panel-field">
-              <span>Number of Curves</span>
-              <input
-                type="number"
-                value={numCurves}
-                onChange={(event) => setNumCurves(Number(event.target.value))}
-                min={2}
-                max={10}
-                step={1}
-              />
-            </label>
+      {(() => {
+        const pumpConfigs = [
+          pump1MultiFreq,
+          pump2MultiFreq,
+          pump3MultiFreq,
+          pump4MultiFreq,
+          pump5MultiFreq
+        ]
+        const hasMultiFreq = pumpConfigs.slice(0, numPumpsToCompare).some(Boolean)
+        if (!hasMultiFreq) {
+          return null
+        }
+        return (
+          <div className="panel-card">
+            <h3 className="panel-heading">Multi-Frequency Settings</h3>
+            <div className="panel-grid">
+              <label className="panel-field">
+                <span>Min Frequency (Hz)</span>
+                <input
+                  type="number"
+                  value={minFreq}
+                  onChange={(event) => setMinFreq(Number(event.target.value))}
+                  min={30}
+                  max={60}
+                  step={1}
+                />
+              </label>
+              <label className="panel-field">
+                <span>Max Frequency (Hz)</span>
+                <input
+                  type="number"
+                  value={maxFreq}
+                  onChange={(event) => setMaxFreq(Number(event.target.value))}
+                  min={40}
+                  max={70}
+                  step={1}
+                />
+              </label>
+              <label className="panel-field">
+                <span>Number of Curves</span>
+                <input
+                  type="number"
+                  value={numCurves}
+                  onChange={(event) => setNumCurves(Number(event.target.value))}
+                  min={2}
+                  max={10}
+                  step={1}
+                />
+              </label>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
       <div className="panel-card">
         <label className="panel-field">
           <span>Points per Curve</span>
@@ -2454,10 +2503,12 @@ export default function App() {
               pumps: [
                 { id: pump1, curves: pump1Curves, multiFreq: pump1MultiFreq, name: pump1 || 'Pump 1' },
                 { id: pump2, curves: pump2Curves, multiFreq: pump2MultiFreq, name: pump2 || 'Pump 2' },
-                ...(numPumpsToCompare >= 3
-                  ? [{ id: pump3, curves: pump3Curves, multiFreq: pump3MultiFreq, name: pump3 || 'Pump 3' }]
-                  : [])
-              ].filter((pumpEntry) => pumpEntry.id),
+                { id: pump3, curves: pump3Curves, multiFreq: pump3MultiFreq, name: pump3 || 'Pump 3' },
+                { id: pump4, curves: pump4Curves, multiFreq: pump4MultiFreq, name: pump4 || 'Pump 4' },
+                { id: pump5, curves: pump5Curves, multiFreq: pump5MultiFreq, name: pump5 || 'Pump 5' }
+              ]
+                .slice(0, numPumpsToCompare)
+                .filter((pumpEntry) => pumpEntry.id),
               curveType: curveTypeToCompare
             }}
           />
@@ -3205,6 +3256,7 @@ export default function App() {
       { path: 'Motor_Load_Percent', label: 'Motor Load', suffix: ' %', digits: 1 },
       { path: 'P_perdida_kW', label: 'Cable Losses', suffix: ' kW', digits: 3 },
       { path: 'P_superficie_kW', label: 'Surface Power', suffix: ' kW', digits: 2 },
+  { path: 'Energy_Index', label: 'Energy Index', suffix: ' kW*d/(m³*m)', digits: 2 },
       { path: 'P_superficie_kVA', label: 'Surface kVA', suffix: ' kVA', digits: 2 },
       { path: 'PF_superficie', label: 'Power Factor', digits: 3 },
       { path: 'Eff_Sistema', label: 'System Efficiency', suffix: ' %', digits: 1, multiplier: 100 }
@@ -3213,7 +3265,12 @@ export default function App() {
     const operatingPointMetrics: MetricDef[] = [
       { path: 'metadata.operating_point.q_m3d', label: 'Operating Flow', suffix: ' m³/d', digits: 1 },
       { path: 'metadata.operating_point.head_m', label: 'Operating TDH', suffix: ' m', digits: 1 },
-      { path: 'metadata.operating_point.pump_bhp_hp', label: 'Pump BHP', suffix: ' hp', digits: 2 }
+      { path: 'metadata.operating_point.pump_bhp_hp', label: 'Pump BHP', suffix: ' hp', digits: 2 },
+      { path: 'metadata.operating_point.pump_efficiency', label: 'Pump Efficiency', suffix: ' %', digits: 1, multiplier: 100 },
+      { path: 'metadata.operating_point.pip_bar', label: 'PIP', suffix: ' bar', digits: 2 },
+      { path: 'metadata.operating_point.pwf_bar', label: 'Pwf', suffix: ' bar', digits: 2 },
+      { path: 'metadata.operating_point.fluid_level_m', label: 'Fluid Level', suffix: ' m', digits: 1 },
+      { path: 'metadata.operating_point.sumergencia_m', label: 'Submergence', suffix: ' m', digits: 1 }
     ]
 
     const metadataMetrics: MetricDef[] = [
@@ -3230,11 +3287,17 @@ export default function App() {
       { path: 'Motor_Load_Percent', label: 'Motor Load (%)', suffix: ' %', digits: 1 },
       { path: 'P_perdida_kW', label: 'Cable Losses (kW)', suffix: ' kW', digits: 3 },
       { path: 'P_superficie_kW', label: 'Surface Power (kW)', suffix: ' kW', digits: 2 },
+  { path: 'Energy_Index', label: 'Energy Index', suffix: ' kW*d/(m³*m)', digits: 2 },
       { path: 'PF_superficie', label: 'Power Factor', digits: 3 },
       { path: 'Eff_Sistema', label: 'System Efficiency (%)', suffix: ' %', digits: 1, multiplier: 100 },
       { path: 'metadata.operating_point.q_m3d', label: 'Operating Flow (m³/d)', suffix: ' m³/d', digits: 1 },
       { path: 'metadata.operating_point.head_m', label: 'Operating TDH (m)', suffix: ' m', digits: 1 },
-      { path: 'metadata.operating_point.pump_bhp_hp', label: 'Pump BHP (hp)', suffix: ' hp', digits: 2 }
+      { path: 'metadata.operating_point.pump_bhp_hp', label: 'Pump BHP (hp)', suffix: ' hp', digits: 2 },
+      { path: 'metadata.operating_point.pump_efficiency', label: 'Pump Efficiency (%)', suffix: ' %', digits: 1, multiplier: 100 },
+      { path: 'metadata.operating_point.pip_bar', label: 'PIP (bar)', suffix: ' bar', digits: 2 },
+      { path: 'metadata.operating_point.pwf_bar', label: 'Pwf (bar)', suffix: ' bar', digits: 2 },
+      { path: 'metadata.operating_point.fluid_level_m', label: 'Fluid Level (m)', suffix: ' m', digits: 1 },
+      { path: 'metadata.operating_point.sumergencia_m', label: 'Submergence (m)', suffix: ' m', digits: 1 }
     ]
 
     const baseData = electricalData || {}

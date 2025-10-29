@@ -316,11 +316,13 @@ export default function CurvePlot({
 
   if (pressureDemandCurve && pressureDemandCurve.curve && pressureDemandCurve.curve.length > 0) {
     const demandQ = pressureDemandCurve.curve.map((p: any) => p.caudal)
-    const demandHeadValues = pressureDemandCurve.curve.map((p: any) => p.tdh)
-    const demandPipValues = pressureDemandCurve.curve.map((p: any) => p.pip)
-    const demandPwfValues = pressureDemandCurve.curve.map((p: any) => p.pwf)
-    const demandLevelValues = pressureDemandCurve.curve.map((p: any) => p.nivel)
-    const demandFrictionValues = pressureDemandCurve.curve.map((p: any) => p.perdidas_friccion)
+  const demandHeadValues = pressureDemandCurve.curve.map((p: any) => p.tdh)
+  const demandPipValues = pressureDemandCurve.curve.map((p: any) => p.pip)
+  const demandPwfValues = pressureDemandCurve.curve.map((p: any) => p.pwf)
+  const demandLevelValues = pressureDemandCurve.curve.map((p: any) => p.nivel)
+  const demandFluidLevelValues = pressureDemandCurve.curve.map((p: any) => p.fluid_level_m)
+  const demandSubmergenceValues = pressureDemandCurve.curve.map((p: any) => p.sumergencia_m)
+  const demandFrictionValues = pressureDemandCurve.curve.map((p: any) => p.perdidas_friccion)
     headRangeMax = Math.max(headRangeMax, Math.max(...demandHeadValues))
 
     demandData = {
@@ -352,7 +354,28 @@ export default function CurvePlot({
         levelAtPoint = interpolateValue(demandQ, demandLevelValues, intersection.q)
       }
 
-      if (
+      if (demandFluidLevelValues && demandFluidLevelValues.length > 0) {
+        const rawFluid = interpolateValue(demandQ, demandFluidLevelValues, intersection.q)
+        if (rawFluid !== null) {
+          fluidLevelAtPoint = rawFluid
+        }
+      }
+
+      if (demandSubmergenceValues && demandSubmergenceValues.length > 0) {
+        const rawSub = interpolateValue(demandQ, demandSubmergenceValues, intersection.q)
+        if (rawSub !== null) {
+          submergenceAtPoint = rawSub
+        }
+      }
+
+      if (fluidLevelAtPoint === null && submergenceAtPoint !== null && typeof pumpDepth === 'number') {
+        const rawFluidLevel = pumpDepth - submergenceAtPoint
+        if (isFinite(rawFluidLevel)) {
+          fluidLevelAtPoint = Math.min(Math.max(rawFluidLevel, 0), pumpDepth)
+        }
+      }
+
+      if (submergenceAtPoint === null &&
         pwfAtPoint !== null &&
         typeof fluidGradient === 'number' &&
         fluidGradient > 0
@@ -360,13 +383,6 @@ export default function CurvePlot({
         const rawSubmergence = pwfAtPoint / fluidGradient
         if (isFinite(rawSubmergence)) {
           submergenceAtPoint = Math.max(rawSubmergence, 0)
-        }
-      }
-
-      if (submergenceAtPoint !== null && typeof pumpDepth === 'number') {
-        const rawFluidLevel = pumpDepth - submergenceAtPoint
-        if (isFinite(rawFluidLevel)) {
-          fluidLevelAtPoint = Math.min(Math.max(rawFluidLevel, 0), pumpDepth)
         }
       }
 

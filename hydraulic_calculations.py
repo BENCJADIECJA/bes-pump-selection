@@ -298,6 +298,10 @@ def calculate_pressure_demand_curve(well_data, ipr_data=None):
         # FORMULA TDH (Total Dynamic Head):
         # TDH = PD + Tf + TP/MG - PIP/MG
         tdh = pd + tf + tp_altura - pip_altura  # m
+
+        # Nivel de fluido relativo a superficie y sumergencia
+        fluid_level_m = max(pd - pip_altura, 0.0)
+        sumergencia_m = max(pd - fluid_level_m, 0.0)
         
         # tf_bar ya está calculado arriba
         
@@ -308,7 +312,9 @@ def calculate_pressure_demand_curve(well_data, ipr_data=None):
             "pip": round(pip_bar, 2),  # bar (Presión de entrada = Pwf + Pcasing)
             "p_intake": round(pip_bar, 2),  # Alias para compatibilidad
             "pwf": round(pwf_bar, 2),  # bar (Presión de fondo fluyente del IPR)
-            "nivel": round(nivel_dinamico, 2),  # m (Nivel dinámico del fluido)
+            "nivel": round(nivel_dinamico, 2),  # m (Nivel dinámico relativo al reservorio)
+            "fluid_level_m": round(fluid_level_m, 2),  # m (Nivel dinámico desde superficie)
+            "sumergencia_m": round(sumergencia_m, 2),  # m (Altura de fluido sobre la bomba)
             "perdidas_friccion": round(tf_bar, 2),  # bar
             "pd": round(pd, 2),  # m (Profundidad de bomba)
             "tp_bar": round(tp_bar, 2)  # bar (Presión superficie)
@@ -321,6 +327,9 @@ def calculate_pressure_demand_curve(well_data, ipr_data=None):
             'profundidad_bomba': profundidad_bomba,
             'profundidad_intake': profundidad_bomba,
             'nivel_fluido': well_data.get('nivel_fluido_dinamico'),
+            'sumergencia_nominal': (
+                (well_data.get('profundidad_intake') or 0.0) - (well_data.get('nivel_fluido_dinamico') or 0.0)
+            ),
             'gradiente': round(gradiente, 5),
             'p_casing': presion_casing
         }
