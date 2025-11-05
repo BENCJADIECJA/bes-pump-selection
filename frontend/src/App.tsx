@@ -99,6 +99,44 @@ const findPumpDemandIntersection = (pumpQ: number[], pumpHead: number[], demandQ
 const toFiniteNumber = (value: any) =>
   typeof value === 'number' && Number.isFinite(value) ? Number(value) : null
 
+const normalizeOperatingPoint = (source: any) => {
+  if (!source || typeof source !== 'object') {
+    return null
+  }
+
+  const toNumber = (value: any) => (typeof value === 'number' && Number.isFinite(value) ? Number(value) : null)
+
+  const flow = toNumber(source.q_m3d ?? source.q ?? source.flow)
+  const head = toNumber(source.head_m ?? source.head ?? source.tdh ?? source.head_meters)
+  const efficiencyRaw = toNumber(source.pump_efficiency ?? source.efficiency)
+  const efficiency = efficiencyRaw !== null ? efficiencyRaw * 100 : null
+  const bhp = toNumber(source.pump_bhp_hp ?? source.bhp_hp ?? source.bhp)
+  const pip = toNumber(source.pip_bar ?? source.pip)
+  const pwf = toNumber(source.pwf_bar ?? source.pwf)
+  const fluidLevel = toNumber(source.fluid_level_m ?? source.fluid_level)
+  const submergence = toNumber(source.sumergencia_m ?? source.submergence)
+  const friction = toNumber(source.friction_loss_m ?? source.friction_m ?? source.friction)
+  const frequency = toNumber(source.frequency_hz ?? source.frequency)
+
+  if (flow === null || head === null) {
+    return null
+  }
+
+  return {
+    flow,
+    head,
+    efficiency,
+    efficiencyFraction: efficiencyRaw,
+    bhp,
+    pip,
+    pwf,
+    fluidLevel,
+    submergence,
+    friction,
+    frequency
+  }
+}
+
 type DesignPump = { id: string | null; stages: number }
 
 export default function App() {
@@ -261,13 +299,17 @@ export default function App() {
   const selectedCableFondoEntry = selectedCableFondo ? cableCatalogById[selectedCableFondo] : null
   const selectedCableSuperficieEntry = selectedCableSuperficie ? cableCatalogById[selectedCableSuperficie] : null
 
-  const scenarioOverridesForIpr = useMemo(() => {
+  const scenarioOverridesPayload = useMemo(() => {
     const filtered: Record<string, ScenarioOverride> = {}
 
     Object.entries(scenarioOverrides || {}).forEach(([key, override]) => {
       if (!override) return
 
       const entry: ScenarioOverride = {}
+
+      if (typeof override.freq === 'number' && Number.isFinite(override.freq)) {
+        entry.freq = override.freq
+      }
 
       if (typeof override.qTest === 'number' && Number.isFinite(override.qTest)) {
         entry.qTest = override.qTest
@@ -285,9 +327,9 @@ export default function App() {
     return filtered
   }, [scenarioOverrides])
 
-  const scenarioOverridesForIprSignature = useMemo(
-    () => JSON.stringify(scenarioOverridesForIpr),
-    [scenarioOverridesForIpr]
+  const scenarioOverridesSignature = useMemo(
+    () => JSON.stringify(scenarioOverridesPayload),
+    [scenarioOverridesPayload]
   )
 
   // Estados para Installation Design (FASE 1)
@@ -364,6 +406,33 @@ export default function App() {
     scenarioOrder: sensitivityEnabled ? availableScenarioKeys : [],
     activeScenarioKey: sensitivityEnabled ? primaryScenarioKey : null
   }
+
+  const baseOperatingPoint = React.useMemo(
+    () => normalizeOperatingPoint(electricalData?.metadata?.operating_point),
+    [electricalData]
+  )
+
+  const scenarioOperatingPointMap = React.useMemo(() => {
+    const entries = Object.entries(scenarioElectricalData || {})
+    if (!entries.length) {
+      return {}
+    }
+    const map: Record<string, any> = {}
+    entries.forEach(([key, value]) => {
+      const normalized = normalizeOperatingPoint(value?.metadata?.operating_point)
+      if (normalized) {
+        map[key] = normalized
+      }
+    })
+    return map
+  }, [scenarioElectricalData])
+
+  const activeOperatingPoint = React.useMemo(() => {
+    if (sensitivityEnabled && primaryScenarioKey) {
+      return scenarioOperatingPointMap[primaryScenarioKey] || baseOperatingPoint
+    }
+    return baseOperatingPoint
+  }, [sensitivityEnabled, primaryScenarioKey, scenarioOperatingPointMap, baseOperatingPoint])
 
   const hasElectricalResults = Boolean(electricalData) || Object.keys(scenarioElectricalData || {}).length > 0
 
@@ -1253,7 +1322,9 @@ export default function App() {
     try {
       const motorQuery = selectedMotorId ? `&motor_id=${encodeURIComponent(selectedMotorId)}` : ''
       const res = await axios.get(`/api/pumps/${encodeURIComponent(selected)}/curves?freq=${freq}&stages=${stages}&points=${points}${motorQuery}`)
-      const payload = res.data || {}
+  const payload = res.data || {}
+  console.log('RESPUESTA COMPLETA DEL BACKEND:', payload)
+  console.log('DATOS ELÉCTRICOS DE ESCENARIO RECIBIDOS:', payload?.electrical_scenarios)
       if (payload.success === false) {
         setError(payload.error || 'Error from server')
         setCurves(null)
@@ -1499,7 +1570,7 @@ export default function App() {
       }
 
       const overridesPayload = sensitivityEnabled
-        ? serializeOverrides(scenarioOverridesForIpr)
+        ? serializeOverrides(scenarioOverridesPayload)
         : {}
 
       if (sensitivityEnabled && Object.keys(overridesPayload).length > 0) {
@@ -1628,7 +1699,7 @@ export default function App() {
         const allScenarioKeys = new Set<string>([...nextScenarioOrder, ...DEFAULT_SCENARIO_ORDER])
         Object.keys(combinedScenarioCurves || {}).forEach((key) => allScenarioKeys.add(key))
         Object.keys(normalizedIprScenarios || {}).forEach((key) => allScenarioKeys.add(key))
-        Object.keys(scenarioOverridesForIpr || {}).forEach((key) => allScenarioKeys.add(key))
+  Object.keys(scenarioOverridesPayload || {}).forEach((key) => allScenarioKeys.add(key))
 
         const nextScenarioCurves: Record<string, any> = {}
         allScenarioKeys.forEach((key) => {
@@ -1731,7 +1802,7 @@ export default function App() {
     // IMPORTANTE: Recalcular cuando cambia el número de bombas
     numPumpsDesign,
     designPumps,
-    scenarioOverridesForIprSignature
+    scenarioOverridesSignature
   ])
   
   // useEffect para actualizar curvas en modo comparador
@@ -2497,6 +2568,7 @@ export default function App() {
         <>
           <CurvePlot
             {...scenarioPlotProps}
+            operatingPoint={activeOperatingPoint}
             curves={null}
             isComparisonMode={true}
             comparisonData={{
@@ -3036,6 +3108,7 @@ export default function App() {
         return (
           <CurvePlot
             {...scenarioPlotProps}
+            operatingPoint={activeOperatingPoint}
             curves={null}
             multiFreqData={multiFreqCurves}
             isMultiFreq={true}
@@ -3060,6 +3133,7 @@ export default function App() {
               <div className="panel-card panel-card--no-padding">
                 <CurvePlot
                   {...scenarioPlotProps}
+                  operatingPoint={activeOperatingPoint}
                   curves={null}
                   iprData={null}
                   showIPR={false}
@@ -3086,6 +3160,7 @@ export default function App() {
         return (
           <CurvePlot
             {...scenarioPlotProps}
+            operatingPoint={activeOperatingPoint}
             curves={curves}
             iprData={null}
             showIPR={false}
@@ -3137,6 +3212,7 @@ export default function App() {
             {(!hasIndividual || pumpCurvesTab === 'combined') && (
               <CurvePlot
                 {...scenarioPlotProps}
+                operatingPoint={activeOperatingPoint}
                 curves={combinedCurves}
                 iprData={null}
                 showIPR={false}
@@ -3145,6 +3221,7 @@ export default function App() {
             {hasIndividual && pumpCurvesTab === 'efficiency' && (
               <CurvePlot
                 {...scenarioPlotProps}
+                operatingPoint={activeOperatingPoint}
                 curves={null}
                 isIndividualEfficiency={true}
                 individualEfficiencyData={individualCurves}
@@ -3153,6 +3230,7 @@ export default function App() {
             {hasIndividual && pumpCurvesTab === 'head' && (
               <CurvePlot
                 {...scenarioPlotProps}
+                operatingPoint={activeOperatingPoint}
                 curves={null}
                 isIndividualHead={true}
                 individualHeadData={individualCurves}
@@ -3163,6 +3241,7 @@ export default function App() {
             {hasIndividual && pumpCurvesTab === 'bhp' && (
               <CurvePlot
                 {...scenarioPlotProps}
+                operatingPoint={activeOperatingPoint}
                 curves={null}
                 isIndividualBhp={true}
                 individualBhpData={individualCurves}
@@ -3191,6 +3270,7 @@ export default function App() {
     return (
       <CurvePlot
         {...scenarioPlotProps}
+        operatingPoint={activeOperatingPoint}
         curves={null}
         isIPRMode={true}
         iprData={iprData}
@@ -3471,6 +3551,7 @@ export default function App() {
     return (
       <CurvePlot
         {...scenarioPlotProps}
+        operatingPoint={activeOperatingPoint}
         curves={null}
         isDemandMode={true}
       />

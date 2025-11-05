@@ -185,7 +185,8 @@ export default function CurvePlot({
   scenarioStyles,
   scenarioOrder,
   activeScenarioKey,
-  hideDemandWithinIPR
+  hideDemandWithinIPR,
+  operatingPoint
 }: any) {
   if (isDemandMode) {
     return (
@@ -310,19 +311,95 @@ export default function CurvePlot({
     : null
 
   let demandData: { q: number[], head: number[], raw: any[] } | null = null
-  let operatingPointWithDemand: any = null
+  let plotOperatingPoint: any = null
   let demandAnnotationText = ''
   let demandHoverTemplate = ''
 
+  const coerceNumeric = (value: any) => (typeof value === 'number' && Number.isFinite(value) ? Number(value) : null)
+
+  if (operatingPoint && typeof operatingPoint === 'object') {
+    const flowValue = coerceNumeric(operatingPoint.flow)
+    const headValue = coerceNumeric(operatingPoint.head)
+    if (flowValue !== null && headValue !== null) {
+      plotOperatingPoint = {
+        q: flowValue,
+        head: headValue,
+        efficiency: coerceNumeric(operatingPoint.efficiency),
+        bhp: coerceNumeric(operatingPoint.bhp),
+        pip: coerceNumeric(operatingPoint.pip),
+        pwf: coerceNumeric(operatingPoint.pwf),
+        fluidLevel: coerceNumeric(operatingPoint.fluidLevel),
+        submergence: coerceNumeric(operatingPoint.submergence),
+        friction: coerceNumeric(operatingPoint.friction)
+      }
+    }
+  }
+
+  const buildOperatingPointStrings = (point: any) => {
+    const annotationLines = [
+      '<b>System Operating Point</b>',
+      `Q = ${point.q.toFixed(1)} m³/d`,
+      `TDH = ${point.head.toFixed(1)} m`
+    ]
+
+    if (point.efficiency !== null && Number.isFinite(point.efficiency)) {
+      annotationLines.push(`η = ${point.efficiency.toFixed(1)} %`)
+    }
+    if (point.bhp !== null && Number.isFinite(point.bhp)) {
+      annotationLines.push(`BHP = ${point.bhp.toFixed(1)} HP`)
+    }
+    if (point.pip !== null && Number.isFinite(point.pip)) {
+      annotationLines.push(`PIP: ${point.pip.toFixed(1)} bar`)
+    }
+    if (point.pwf !== null && Number.isFinite(point.pwf)) {
+      annotationLines.push(`Pwf: ${point.pwf.toFixed(1)} bar`)
+    }
+    if (point.fluidLevel !== null && Number.isFinite(point.fluidLevel)) {
+      annotationLines.push(`Fluid Level: ${point.fluidLevel.toFixed(1)} m`)
+    }
+    if (point.submergence !== null && Number.isFinite(point.submergence)) {
+      annotationLines.push(`Submergence: ${point.submergence.toFixed(1)} m`)
+    }
+
+    const hoverLines = [
+      '<b>System Operating Point</b>',
+      `Flow: ${point.q.toFixed(2)} m³/d`,
+      `TDH: ${point.head.toFixed(2)} m`
+    ]
+
+    if (point.efficiency !== null && Number.isFinite(point.efficiency)) {
+      hoverLines.push(`Efficiency: ${point.efficiency.toFixed(2)} %`)
+    }
+    if (point.bhp !== null && Number.isFinite(point.bhp)) {
+      hoverLines.push(`BHP: ${point.bhp.toFixed(2)} HP`)
+    }
+    if (point.pip !== null && Number.isFinite(point.pip)) {
+      hoverLines.push(`PIP: ${point.pip.toFixed(2)} bar`)
+    }
+    if (point.pwf !== null && Number.isFinite(point.pwf)) {
+      hoverLines.push(`Pwf: ${point.pwf.toFixed(2)} bar`)
+    }
+    if (point.fluidLevel !== null && Number.isFinite(point.fluidLevel)) {
+      hoverLines.push(`Fluid Level: ${point.fluidLevel.toFixed(2)} m`)
+    }
+    if (point.submergence !== null && Number.isFinite(point.submergence)) {
+      hoverLines.push(`Submergence: ${point.submergence.toFixed(2)} m`)
+    }
+
+    return {
+      annotation: annotationLines.join('<br>'),
+      hover: `${hoverLines.join('<br>')}<extra></extra>`
+    }
+  }
+
   if (pressureDemandCurve && pressureDemandCurve.curve && pressureDemandCurve.curve.length > 0) {
     const demandQ = pressureDemandCurve.curve.map((p: any) => p.caudal)
-  const demandHeadValues = pressureDemandCurve.curve.map((p: any) => p.tdh)
-  const demandPipValues = pressureDemandCurve.curve.map((p: any) => p.pip)
-  const demandPwfValues = pressureDemandCurve.curve.map((p: any) => p.pwf)
-  const demandLevelValues = pressureDemandCurve.curve.map((p: any) => p.nivel)
-  const demandFluidLevelValues = pressureDemandCurve.curve.map((p: any) => p.fluid_level_m)
-  const demandSubmergenceValues = pressureDemandCurve.curve.map((p: any) => p.sumergencia_m)
-  const demandFrictionValues = pressureDemandCurve.curve.map((p: any) => p.perdidas_friccion)
+    const demandHeadValues = pressureDemandCurve.curve.map((p: any) => p.tdh)
+    const demandPipValues = pressureDemandCurve.curve.map((p: any) => p.pip)
+    const demandPwfValues = pressureDemandCurve.curve.map((p: any) => p.pwf)
+    const demandFluidLevelValues = pressureDemandCurve.curve.map((p: any) => p.fluid_level_m)
+    const demandSubmergenceValues = pressureDemandCurve.curve.map((p: any) => p.sumergencia_m)
+    const demandFrictionValues = pressureDemandCurve.curve.map((p: any) => p.perdidas_friccion)
     headRangeMax = Math.max(headRangeMax, Math.max(...demandHeadValues))
 
     demandData = {
@@ -331,96 +408,135 @@ export default function CurvePlot({
       raw: pressureDemandCurve.curve
     }
 
-    const intersection = findPumpDemandIntersection(q, head, demandQ, demandHeadValues)
-    if (intersection) {
-      const effAtPoint = interpolateValue(q, eff, intersection.q)
-      const bhpAtPoint = interpolateValue(q, bhp, intersection.q)
-
-      let pipAtPoint: number | null = null
-      let pwfAtPoint: number | null = null
-      let levelAtPoint: number | null = null
-      let submergenceAtPoint: number | null = null
-      let fluidLevelAtPoint: number | null = null
-
-      if (demandPipValues && demandPipValues.length > 0) {
-        pipAtPoint = interpolateValue(demandQ, demandPipValues, intersection.q)
-      }
-
-      if (demandPwfValues && demandPwfValues.length > 0) {
-        pwfAtPoint = interpolateValue(demandQ, demandPwfValues, intersection.q)
-      }
-
-      if (demandLevelValues && demandLevelValues.length > 0) {
-        levelAtPoint = interpolateValue(demandQ, demandLevelValues, intersection.q)
-      }
-
-      if (demandFluidLevelValues && demandFluidLevelValues.length > 0) {
-        const rawFluid = interpolateValue(demandQ, demandFluidLevelValues, intersection.q)
-        if (rawFluid !== null) {
-          fluidLevelAtPoint = rawFluid
+    if (plotOperatingPoint) {
+      const targetQ = plotOperatingPoint.q
+      if (Number.isFinite(targetQ)) {
+        if (plotOperatingPoint.pip === null && demandPipValues.length > 0) {
+          const pipAtPoint = interpolateValue(demandQ, demandPipValues, targetQ)
+          if (pipAtPoint !== null) {
+            plotOperatingPoint.pip = pipAtPoint
+          }
+        }
+        if (plotOperatingPoint.pwf === null && demandPwfValues.length > 0) {
+          const pwfAtPoint = interpolateValue(demandQ, demandPwfValues, targetQ)
+          if (pwfAtPoint !== null) {
+            plotOperatingPoint.pwf = pwfAtPoint
+          }
+        }
+        if (plotOperatingPoint.fluidLevel === null && demandFluidLevelValues.length > 0) {
+          const fluidAtPoint = interpolateValue(demandQ, demandFluidLevelValues, targetQ)
+          if (fluidAtPoint !== null) {
+            plotOperatingPoint.fluidLevel = fluidAtPoint
+          }
+        }
+        if (plotOperatingPoint.submergence === null && demandSubmergenceValues.length > 0) {
+          const subAtPoint = interpolateValue(demandQ, demandSubmergenceValues, targetQ)
+          if (subAtPoint !== null) {
+            plotOperatingPoint.submergence = subAtPoint
+          }
+        }
+        if (plotOperatingPoint.friction === null && demandFrictionValues.length > 0) {
+          const frictionAtPoint = interpolateValue(demandQ, demandFrictionValues, targetQ)
+          if (frictionAtPoint !== null) {
+            plotOperatingPoint.friction = frictionAtPoint
+          }
+        }
+        if (
+          plotOperatingPoint.fluidLevel === null &&
+          plotOperatingPoint.submergence !== null &&
+          typeof pumpDepth === 'number'
+        ) {
+          const rawFluidLevel = pumpDepth - plotOperatingPoint.submergence
+          if (isFinite(rawFluidLevel)) {
+            plotOperatingPoint.fluidLevel = Math.min(Math.max(rawFluidLevel, 0), pumpDepth)
+          }
+        }
+        if (
+          plotOperatingPoint.submergence === null &&
+          plotOperatingPoint.pwf !== null &&
+          typeof fluidGradient === 'number' &&
+          fluidGradient > 0
+        ) {
+          const rawSubmergence = plotOperatingPoint.pwf / fluidGradient
+          if (isFinite(rawSubmergence)) {
+            plotOperatingPoint.submergence = Math.max(rawSubmergence, 0)
+          }
         }
       }
+    } else {
+      const intersection = findPumpDemandIntersection(q, head, demandQ, demandHeadValues)
+      if (intersection) {
+        const effAtPoint = interpolateValue(q, eff, intersection.q)
+        const bhpAtPoint = interpolateValue(q, bhp, intersection.q)
 
-      if (demandSubmergenceValues && demandSubmergenceValues.length > 0) {
-        const rawSub = interpolateValue(demandQ, demandSubmergenceValues, intersection.q)
-        if (rawSub !== null) {
-          submergenceAtPoint = rawSub
+        let pipAtPoint: number | null = null
+        let pwfAtPoint: number | null = null
+        let submergenceAtPoint: number | null = null
+        let fluidLevelAtPoint: number | null = null
+
+        if (demandPipValues && demandPipValues.length > 0) {
+          pipAtPoint = interpolateValue(demandQ, demandPipValues, intersection.q)
+        }
+
+        if (demandPwfValues && demandPwfValues.length > 0) {
+          pwfAtPoint = interpolateValue(demandQ, demandPwfValues, intersection.q)
+        }
+
+        if (demandFluidLevelValues && demandFluidLevelValues.length > 0) {
+          const rawFluid = interpolateValue(demandQ, demandFluidLevelValues, intersection.q)
+          if (rawFluid !== null) {
+            fluidLevelAtPoint = rawFluid
+          }
+        }
+
+        if (demandSubmergenceValues && demandSubmergenceValues.length > 0) {
+          const rawSub = interpolateValue(demandQ, demandSubmergenceValues, intersection.q)
+          if (rawSub !== null) {
+            submergenceAtPoint = rawSub
+          }
+        }
+
+        if (fluidLevelAtPoint === null && submergenceAtPoint !== null && typeof pumpDepth === 'number') {
+          const rawFluidLevel = pumpDepth - submergenceAtPoint
+          if (isFinite(rawFluidLevel)) {
+            fluidLevelAtPoint = Math.min(Math.max(rawFluidLevel, 0), pumpDepth)
+          }
+        }
+
+        if (
+          submergenceAtPoint === null &&
+          pwfAtPoint !== null &&
+          typeof fluidGradient === 'number' &&
+          fluidGradient > 0
+        ) {
+          const rawSubmergence = pwfAtPoint / fluidGradient
+          if (isFinite(rawSubmergence)) {
+            submergenceAtPoint = Math.max(rawSubmergence, 0)
+          }
+        }
+
+        plotOperatingPoint = {
+          q: intersection.q,
+          head: intersection.head,
+          efficiency: effAtPoint !== null ? effAtPoint : null,
+          bhp: bhpAtPoint !== null ? bhpAtPoint : null,
+          pip: pipAtPoint,
+          pwf: pwfAtPoint,
+          fluidLevel: fluidLevelAtPoint,
+          submergence: submergenceAtPoint,
+          friction:
+            demandFrictionValues && demandFrictionValues.length > 0
+              ? interpolateValue(demandQ, demandFrictionValues, intersection.q)
+              : null
         }
       }
-
-      if (fluidLevelAtPoint === null && submergenceAtPoint !== null && typeof pumpDepth === 'number') {
-        const rawFluidLevel = pumpDepth - submergenceAtPoint
-        if (isFinite(rawFluidLevel)) {
-          fluidLevelAtPoint = Math.min(Math.max(rawFluidLevel, 0), pumpDepth)
-        }
-      }
-
-      if (submergenceAtPoint === null &&
-        pwfAtPoint !== null &&
-        typeof fluidGradient === 'number' &&
-        fluidGradient > 0
-      ) {
-        const rawSubmergence = pwfAtPoint / fluidGradient
-        if (isFinite(rawSubmergence)) {
-          submergenceAtPoint = Math.max(rawSubmergence, 0)
-        }
-      }
-
-      operatingPointWithDemand = {
-        q: intersection.q,
-        head: intersection.head,
-        efficiency: effAtPoint,
-        bhp: bhpAtPoint,
-        pip: pipAtPoint,
-        pwf: pwfAtPoint,
-        nivel: levelAtPoint,
-        fluidLevel: fluidLevelAtPoint,
-        submergence: submergenceAtPoint,
-        friction: demandFrictionValues && demandFrictionValues.length > 0
-          ? interpolateValue(demandQ, demandFrictionValues, intersection.q)
-          : null
-      }
-
-      demandAnnotationText = `<b>System Operating Point</b><br>Q = ${intersection.q.toFixed(1)} m³/d` +
-        `<br>TDH = ${intersection.head.toFixed(1)} m` +
-        (effAtPoint !== null ? `<br>η = ${effAtPoint.toFixed(1)} %` : '') +
-        (bhpAtPoint !== null ? `<br>BHP = ${bhpAtPoint.toFixed(1)} HP` : '') +
-        (pipAtPoint !== null ? `<br>PIP: ${pipAtPoint.toFixed(1)} bar` : '') +
-        (pwfAtPoint !== null ? `<br>Pwf: ${pwfAtPoint.toFixed(1)} bar` : '') +
-        (fluidLevelAtPoint !== null ? `<br>Fluid Level: ${fluidLevelAtPoint.toFixed(1)} m` : '') +
-        (submergenceAtPoint !== null ? `<br>Submergence: ${submergenceAtPoint.toFixed(1)} m` : '')
-
-      demandHoverTemplate = `<b>System Operating Point</b><br>` +
-        `Flow: ${intersection.q.toFixed(2)} m³/d<br>` +
-        `TDH: ${intersection.head.toFixed(2)} m` +
-        (effAtPoint !== null ? `<br>Efficiency: ${effAtPoint.toFixed(2)} %` : '') +
-        (bhpAtPoint !== null ? `<br>BHP: ${bhpAtPoint.toFixed(2)} HP` : '') +
-        (pipAtPoint !== null ? `<br>PIP: ${pipAtPoint.toFixed(2)} bar` : '') +
-        (pwfAtPoint !== null ? `<br>Pwf: ${pwfAtPoint.toFixed(2)} bar` : '') +
-        (fluidLevelAtPoint !== null ? `<br>Fluid Level: ${fluidLevelAtPoint.toFixed(2)} m` : '') +
-        (submergenceAtPoint !== null ? `<br>Submergence: ${submergenceAtPoint.toFixed(2)} m` : '') +
-        '<extra></extra>'
     }
+  }
+
+  if (plotOperatingPoint) {
+    const strings = buildOperatingPointStrings(plotOperatingPoint)
+    demandAnnotationText = strings.annotation
+    demandHoverTemplate = strings.hover
   }
 
   // Encontrar el BEP (Best Efficiency Point) - punto de máxima eficiencia
@@ -537,10 +653,10 @@ export default function CurvePlot({
     })
   }
 
-  if (operatingPointWithDemand) {
+  if (plotOperatingPoint) {
     data.push({
-      x: [operatingPointWithDemand.q],
-      y: [operatingPointWithDemand.head],
+      x: [plotOperatingPoint.q],
+      y: [plotOperatingPoint.head],
       mode: 'markers',
       type: 'scatter',
       marker: {
@@ -595,10 +711,10 @@ export default function CurvePlot({
 
   const annotations: any[] = []
 
-  if (operatingPointWithDemand) {
+  if (plotOperatingPoint) {
     annotations.push({
-      x: operatingPointWithDemand.q,
-      y: operatingPointWithDemand.head,
+      x: plotOperatingPoint.q,
+      y: plotOperatingPoint.head,
       xanchor: 'left',
       yanchor: 'bottom',
       text: demandAnnotationText,

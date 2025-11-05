@@ -175,8 +175,6 @@ const computeDefaultPosition = () => {
   }
 }
 
-const AUTO_SAVE_DELAY_MS = 200
-
 export default function ScenarioSensitivityModal({
   open,
   scenarioKey,
@@ -203,7 +201,9 @@ export default function ScenarioSensitivityModal({
   const lastScenarioRef = useRef<string | null>(null)
   const initialValuesRef = useRef<ScenarioValues | null>(null)
   const lastAppliedRef = useRef<ScenarioValues | null>(null)
+  const skipCommitRef = useRef(false)
 
+  const latestDraftRef = useRef<ScenarioValues | null>(null)
   const currentValues = () => {
     const freqNumber = parseEditableNumber(freq)
     const qNumber = parseEditableNumber(qTest)
@@ -228,6 +228,28 @@ export default function ScenarioSensitivityModal({
       lockFlow,
       lockPwf
     }
+  }
+
+  const commitDraftValues = () => {
+    if (!open || !scenarioKey) {
+      return
+    }
+
+    if (skipCommitRef.current) {
+      skipCommitRef.current = false
+      return
+    }
+
+    const latest = currentValues()
+    if (!latest) {
+      return
+    }
+
+    if (!scenariosEqual(latest, lastAppliedRef.current)) {
+      lastAppliedRef.current = latest
+      onSave(scenarioKey, latest)
+    }
+    latestDraftRef.current = latest
   }
 
   const clampPosition = (coords: { x: number; y: number }) => {
@@ -260,29 +282,60 @@ export default function ScenarioSensitivityModal({
 
       initialValuesRef.current = initial
       lastAppliedRef.current = initial
+      latestDraftRef.current = initial
 
-  setFreq(String(initial.freq))
-  setQTest(initial.qTest !== undefined ? String(initial.qTest) : '')
-  setPwfTest(initial.pwfTest !== undefined ? String(initial.pwfTest) : '')
+      setFreq(String(initial.freq))
+      setQTest(initial.qTest !== undefined ? String(initial.qTest) : '')
+      setPwfTest(initial.pwfTest !== undefined ? String(initial.pwfTest) : '')
       setLockFlow(Boolean(initial.lockFlow))
       setLockPwf(Boolean(initial.lockPwf))
     }
   }, [open, scenarioKey, values])
 
   useEffect(() => {
+    latestDraftRef.current = currentValues()
+  }, [freq, qTest, pwfTest, lockFlow, lockPwf])
+
+  useEffect(() => {
     if (!open) {
       initialValuesRef.current = null
       lastAppliedRef.current = null
+      latestDraftRef.current = null
+      skipCommitRef.current = false
       setLockFlow(false)
       setLockPwf(false)
     }
   }, [open])
 
   useEffect(() => {
+    if (!open || !scenarioKey) {
+      return
+    }
+
+    return () => {
+      if (skipCommitRef.current) {
+        skipCommitRef.current = false
+        return
+      }
+
+      const latest = latestDraftRef.current
+      if (!latest) {
+        return
+      }
+
+      if (!scenariosEqual(latest, lastAppliedRef.current)) {
+        lastAppliedRef.current = latest
+        onSave(scenarioKey, latest)
+      }
+    }
+  }, [open, scenarioKey, onSave])
+
+  useEffect(() => {
     if (!open) return
 
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        skipCommitRef.current = true
         onClose()
       }
     }
@@ -363,26 +416,6 @@ export default function ScenarioSensitivityModal({
     return () => window.removeEventListener('resize', handleResize)
   }, [open])
 
-  useEffect(() => {
-    if (!open || !scenarioKey) {
-      return
-    }
-
-    const latest = currentValues()
-    if (!latest) {
-      return
-    }
-
-    const handle = window.setTimeout(() => {
-      if (!scenariosEqual(latest, lastAppliedRef.current)) {
-        lastAppliedRef.current = latest
-        onSave(scenarioKey, latest)
-      }
-    }, AUTO_SAVE_DELAY_MS)
-
-    return () => window.clearTimeout(handle)
-  }, [freq, qTest, pwfTest, lockFlow, lockPwf, open, scenarioKey, onSave])
-
   if (!open || !scenarioKey) {
     return null
   }
@@ -403,11 +436,12 @@ export default function ScenarioSensitivityModal({
   const currentLabel = scenarioLabel || scenarioKey
 
   const handleCancel = () => {
+    skipCommitRef.current = false
     const initial = initialValuesRef.current
     if (initial && scenarioKey) {
-  setFreq(String(initial.freq))
-  setQTest(initial.qTest !== undefined ? String(initial.qTest) : '')
-  setPwfTest(initial.pwfTest !== undefined ? String(initial.pwfTest) : '')
+      setFreq(String(initial.freq))
+      setQTest(initial.qTest !== undefined ? String(initial.qTest) : '')
+      setPwfTest(initial.pwfTest !== undefined ? String(initial.pwfTest) : '')
       setLockFlow(Boolean(initial.lockFlow))
       setLockPwf(Boolean(initial.lockPwf))
       if (!scenariosEqual(initial, lastAppliedRef.current)) {
@@ -443,7 +477,10 @@ export default function ScenarioSensitivityModal({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              commitDraftValues()
+              onClose()
+            }}
             onPointerDown={(event) => event.stopPropagation()}
             style={closeButtonStyle}
             aria-label="Close sensitivity dialog"
@@ -463,6 +500,7 @@ export default function ScenarioSensitivityModal({
               max={70}
               step={0.5}
               style={inputStyle}
+              onBlur={commitDraftValues}
             />
           </label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -478,6 +516,7 @@ export default function ScenarioSensitivityModal({
               min={0}
               step={5}
               style={inputStyle}
+              onBlur={commitDraftValues}
             />
           </label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -493,6 +532,7 @@ export default function ScenarioSensitivityModal({
               min={0}
               step={1}
               style={inputStyle}
+              onBlur={commitDraftValues}
             />
           </label>
         </div>
@@ -501,14 +541,20 @@ export default function ScenarioSensitivityModal({
           <button
             type="button"
             onClick={handleCancel}
-            onPointerDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => {
+              skipCommitRef.current = true
+              event.stopPropagation()
+            }}
             style={secondaryButtonStyle}
           >
             Cancel
           </button>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              commitDraftValues()
+              onClose()
+            }}
             onPointerDown={(event) => event.stopPropagation()}
             style={primaryButtonStyle}
           >

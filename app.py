@@ -89,6 +89,31 @@ def calculate_conditions():
             if pwf_override is not None:
                 target['pwf_test'] = pwf_override
 
+            method = str(target.get('method', '')).lower()
+            if method == 'linear':
+                try:
+                    pr_value = float(target.get('presion_reservorio'))
+                except (TypeError, ValueError):
+                    pr_value = None
+
+                def to_float(value):
+                    try:
+                        return float(value)
+                    except (TypeError, ValueError):
+                        return None
+
+                q_value = to_float(target.get('q_test'))
+                pwf_value = to_float(target.get('pwf_test'))
+
+                if (
+                    pr_value is not None
+                    and q_value is not None
+                    and pwf_value is not None
+                ):
+                    delta_p = pr_value - pwf_value
+                    if delta_p > 0:
+                        target['pi'] = q_value / delta_p
+
             return target
 
         def parse_frequency(value, default=None):
