@@ -16,7 +16,7 @@ well_data = {
     'profundidad_intake': 1500,  # m
     'nivel_fluido_dinamico': 500,  # m desde superficie
     'presion_superficie': 10,  # bar
-    'presion_casing': 5,  # bar
+    'presion_casing': 1,  # bar
     'ipr_method': 'vogel',
     'q_max_estimate': 400,
     'n_points': 20

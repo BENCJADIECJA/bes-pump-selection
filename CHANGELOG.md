@@ -16,6 +16,9 @@
 ### Changed
 - `equipment_selection.py` actualizado para ser más tolerante con nombres de columnas y hojas.
 - `app.py` actualizado para validar errores de curva y exponer mapeo de columnas.
+- Frontend: sincronización de puntos de operación entre tablas, gráficas y exportaciones; los overrides de escenarios ahora se propagan de forma consistente (ver `docs/operating-point-synchronization.md`).
+- `well_performance.calculate_ipr_vogel` ahora implementa la IPR compuesta (Standing): maneja reservorios saturados y sub-saturados, estima PI (J) y calcula el AOFP correctamente.
+- Frontend: el gráfico "Combined System" ahora muestra el TDH sensitivity map (curvas de demanda y puntos de operación por escenario) superpuesto a la curva combinada de bomba.
 
 ### Fixed
 - Se solucionó la carga de catálogos cuando los nombres de hoja no coincidían exactamente (antes se cargaban catálogos dummy).

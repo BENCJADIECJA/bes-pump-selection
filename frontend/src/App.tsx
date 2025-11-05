@@ -137,6 +137,143 @@ const normalizeOperatingPoint = (source: any) => {
   }
 }
 
+const findClosestCurvePoint = (series: any[] | undefined, targetQ: number) => {
+  if (!Array.isArray(series) || series.length === 0) {
+    return null
+  }
+
+  let closestEntry: { caudal: number; valor: number } | null = null
+  let minDelta = Infinity
+
+  series.forEach((point: any) => {
+    const flow = Number(point?.caudal)
+    const value = Number(point?.valor)
+    if (!Number.isFinite(flow) || !Number.isFinite(value)) {
+      return
+    }
+    const delta = Math.abs(flow - targetQ)
+    if (delta < minDelta) {
+      minDelta = delta
+      closestEntry = { caudal: flow, valor: value }
+    }
+  })
+
+  return closestEntry
+}
+
+const buildCombinedPumpCurves = (curveList: any[]): any | null => {
+  if (!Array.isArray(curveList) || curveList.length === 0) {
+    return null
+  }
+
+  const validCurves = curveList.filter(
+    (curve) =>
+      curve &&
+      Array.isArray(curve.head) &&
+      curve.head.length > 0 &&
+      Array.isArray(curve.bhp) &&
+      curve.bhp.length > 0
+  )
+
+  if (!validCurves.length) {
+    return null
+  }
+
+  if (validCurves.length === 1) {
+    return validCurves[0]
+  }
+
+  const maxQs = validCurves
+    .map((curve) => {
+      const flows = Array.isArray(curve.head)
+        ? curve.head
+            .map((point: any) => Number(point?.caudal))
+            .filter((value: number) => Number.isFinite(value))
+        : []
+      return flows.length ? Math.max(...flows) : null
+    })
+    .filter((value): value is number => value !== null && Number.isFinite(value))
+
+  if (!maxQs.length) {
+    return validCurves[0]
+  }
+
+  const minMaxQ = Math.min(...maxQs)
+
+  const referencePoints = validCurves[0].head
+    .map((point: any) => ({
+      caudal: Number(point?.caudal),
+      valor: Number(point?.valor)
+    }))
+    .filter((point) => Number.isFinite(point.caudal) && point.caudal <= minMaxQ)
+
+  const combinedHead: any[] = []
+  const combinedBhp: any[] = []
+  const combinedEfficiency: any[] = []
+
+  referencePoints.forEach((reference) => {
+    const flow = reference.caudal
+    if (!Number.isFinite(flow)) {
+      return
+    }
+
+    let summedHead = 0
+    let summedBhp = 0
+    let validHeadCount = 0
+
+    validCurves.forEach((curve) => {
+      const headPoint = findClosestCurvePoint(curve.head, flow)
+      if (headPoint && Number.isFinite(headPoint.valor)) {
+        summedHead += headPoint.valor
+        validHeadCount += 1
+      }
+
+      const bhpPoint = findClosestCurvePoint(curve.bhp, flow)
+      if (bhpPoint && Number.isFinite(bhpPoint.valor)) {
+        summedBhp += bhpPoint.valor
+      }
+    })
+
+    if (validHeadCount === validCurves.length) {
+      combinedHead.push({ caudal: flow, valor: summedHead })
+      combinedBhp.push({ caudal: flow, valor: summedBhp })
+
+      const efficiency = summedBhp > 0 ? (flow * summedHead) / (6570 * summedBhp) : 0
+      combinedEfficiency.push({ caudal: flow, valor: efficiency })
+    }
+  })
+
+  const operatingRanges = validCurves
+    .map((curve) => curve?.operating_range)
+    .filter((range: any) => range && Number.isFinite(range.min_q) && Number.isFinite(range.max_q))
+
+  let combinedRange: { min_q: number; max_q: number } | undefined
+
+  if (operatingRanges.length > 0) {
+    const minCandidates = operatingRanges
+      .map((range: any) => Number(range.min_q))
+      .filter((value: number) => Number.isFinite(value))
+    const maxCandidates = operatingRanges
+      .map((range: any) => Number(range.max_q))
+      .filter((value: number) => Number.isFinite(value))
+
+    if (minCandidates.length > 0 && maxCandidates.length > 0) {
+      const min_q = Math.max(...minCandidates)
+      const max_q = Math.min(...maxCandidates)
+      if (Number.isFinite(min_q) && Number.isFinite(max_q) && max_q > min_q) {
+        combinedRange = { min_q, max_q }
+      }
+    }
+  }
+
+  return {
+    head: combinedHead,
+    bhp: combinedBhp,
+    efficiency: combinedEfficiency,
+    operating_range: combinedRange
+  }
+}
+
 type DesignPump = { id: string | null; stages: number }
 
 export default function App() {
@@ -338,7 +475,7 @@ export default function App() {
   const [tubingIdMm, setTubingIdMm] = useState(62.0)  // mm
   const [tubingRoughness, setTubingRoughness] = useState('acero_nuevo')
   const [presionSuperficie, setPresionSuperficie] = useState(10)  // bar
-  const [presionCasing, setPresionCasing] = useState(5)  // bar
+  const [presionCasing, setPresionCasing] = useState(1)  // bar
 
   const scenarioStyles = React.useMemo(() => {
     const styles: any = {}
@@ -406,33 +543,6 @@ export default function App() {
     scenarioOrder: sensitivityEnabled ? availableScenarioKeys : [],
     activeScenarioKey: sensitivityEnabled ? primaryScenarioKey : null
   }
-
-  const baseOperatingPoint = React.useMemo(
-    () => normalizeOperatingPoint(electricalData?.metadata?.operating_point),
-    [electricalData]
-  )
-
-  const scenarioOperatingPointMap = React.useMemo(() => {
-    const entries = Object.entries(scenarioElectricalData || {})
-    if (!entries.length) {
-      return {}
-    }
-    const map: Record<string, any> = {}
-    entries.forEach(([key, value]) => {
-      const normalized = normalizeOperatingPoint(value?.metadata?.operating_point)
-      if (normalized) {
-        map[key] = normalized
-      }
-    })
-    return map
-  }, [scenarioElectricalData])
-
-  const activeOperatingPoint = React.useMemo(() => {
-    if (sensitivityEnabled && primaryScenarioKey) {
-      return scenarioOperatingPointMap[primaryScenarioKey] || baseOperatingPoint
-    }
-    return baseOperatingPoint
-  }, [sensitivityEnabled, primaryScenarioKey, scenarioOperatingPointMap, baseOperatingPoint])
 
   const hasElectricalResults = Boolean(electricalData) || Object.keys(scenarioElectricalData || {}).length > 0
 
@@ -707,17 +817,34 @@ export default function App() {
   ])
 
   useEffect(() => {
-    if (!sensitivityEnabled || !showIPR || !selected || numPumpsDesign !== 1) {
+    const resetScenarioCurves = () => {
       setScenarioPumpCurves({})
       setScenarioMeta({})
       setScenarioPumpLoading(false)
+    }
+
+    if (!sensitivityEnabled) {
+      resetScenarioCurves()
       return
     }
 
     if (!availableScenarioKeys.length) {
-      setScenarioPumpCurves({})
-      setScenarioMeta({})
-      setScenarioPumpLoading(false)
+      resetScenarioCurves()
+      return
+    }
+
+    const isSinglePump = numPumpsDesign === 1
+    const designPumpList = designPumps
+      .slice(0, numPumpsDesign)
+      .filter((pump) => pump && pump.id)
+
+    if (isSinglePump && !selected) {
+      resetScenarioCurves()
+      return
+    }
+
+    if (!isSinglePump && designPumpList.length === 0) {
+      resetScenarioCurves()
       return
     }
 
@@ -725,31 +852,83 @@ export default function App() {
     const controller = new AbortController()
     setScenarioPumpLoading(true)
 
+    const motorQuery = selectedMotorId ? `&motor_id=${encodeURIComponent(selectedMotorId)}` : ''
+    const pumpCurveCache = new Map<string, Promise<any>>()
+
+    const individualCurveMap = new Map<string, any>()
+    if (!isSinglePump) {
+      individualCurves.forEach((entry: any) => {
+        const pumpId = entry?.name
+        if (pumpId && entry?.curves) {
+          individualCurveMap.set(pumpId, entry.curves)
+        }
+      })
+    }
+
+    const fetchPumpCurve = (pumpId: string, stageCount: number, targetFrequency: number) => {
+      const cacheKey = `${pumpId}::${stageCount}::${targetFrequency.toFixed(6)}`
+      if (pumpCurveCache.has(cacheKey)) {
+        return pumpCurveCache.get(cacheKey)!
+      }
+
+      const url = `/api/pumps/${encodeURIComponent(pumpId)}/curves?freq=${targetFrequency}&stages=${stageCount}&points=${points}${motorQuery}`
+      const request = axios
+        .get(url, { signal: controller.signal })
+        .then((response) => {
+          const payload = response.data || {}
+          return payload.curves || payload
+        })
+
+      pumpCurveCache.set(cacheKey, request)
+      return request
+    }
+
     const loadScenarioCurves = async () => {
       try {
         const requests = await Promise.all(
           availableScenarioKeys.map(async (scenarioKey) => {
             const display = scenarioDisplayValues?.[scenarioKey]
-            const targetFrequency = typeof display?.freq === 'number' ? display.freq : freq
+            const targetFrequency =
+              typeof display?.freq === 'number' && Number.isFinite(display.freq)
+                ? display.freq
+                : freq
 
             if (!Number.isFinite(targetFrequency)) {
               return { scenarioKey, curves: null, frequency: display?.freq }
             }
 
-            if (
-              curves &&
-              Number.isFinite(freq) &&
-              Math.abs(targetFrequency - freq) < 1e-6
-            ) {
-              return { scenarioKey, curves, frequency: targetFrequency }
+            const isBaseFrequency = Number.isFinite(freq) && Math.abs(targetFrequency - freq) < 1e-6
+
+            if (isSinglePump) {
+              let curvePayload: any = null
+              if (isBaseFrequency && curves) {
+                curvePayload = curves
+              } else if (selected) {
+                curvePayload = await fetchPumpCurve(selected, stages, targetFrequency)
+              }
+              return { scenarioKey, curves: curvePayload, frequency: targetFrequency }
             }
 
-            const motorQuery = selectedMotorId ? `&motor_id=${encodeURIComponent(selectedMotorId)}` : ''
-            const url = `/api/pumps/${encodeURIComponent(selected)}/curves?freq=${targetFrequency}&stages=${stages}&points=${points}${motorQuery}`
-            const response = await axios.get(url, { signal: controller.signal })
-            const payload = response.data || {}
-            const curvePayload = payload.curves || payload
-            return { scenarioKey, curves: curvePayload, frequency: targetFrequency }
+            const pumpCurvesForScenario = await Promise.all(
+              designPumpList.map(async (pump: any) => {
+                if (!pump?.id) {
+                  return null
+                }
+
+                if (isBaseFrequency && individualCurveMap.has(pump.id)) {
+                  return individualCurveMap.get(pump.id)
+                }
+
+                const stageCount = Number.isFinite(pump.stages) ? pump.stages : stages
+                return fetchPumpCurve(pump.id, stageCount, targetFrequency)
+              })
+            )
+
+            const combined = buildCombinedPumpCurves(
+              pumpCurvesForScenario.filter((entry): entry is any => Boolean(entry))
+            )
+
+            return { scenarioKey, curves: combined, frequency: targetFrequency }
           })
         )
 
@@ -761,7 +940,10 @@ export default function App() {
         const metaMap: Record<string, { frequency?: number }> = {}
 
         requests.forEach((entry) => {
-          if (!entry) return
+          if (!entry) {
+            return
+          }
+
           metaMap[entry.scenarioKey] = { frequency: entry.frequency }
           if (entry.curves) {
             pumpMap[entry.scenarioKey] = entry.curves
@@ -790,16 +972,17 @@ export default function App() {
     }
   }, [
     sensitivityEnabled,
-    showIPR,
-    selected,
-    numPumpsDesign,
     availableScenarioKeys,
     scenarioDisplayValues,
     freq,
     curves,
     stages,
     points,
-    selectedMotorId
+    selected,
+    selectedMotorId,
+    numPumpsDesign,
+    designPumps,
+    individualCurves
   ])
 
   const scenarioOperatingSummary = useMemo(() => {
@@ -978,7 +1161,11 @@ export default function App() {
         ? pwfValue
         : (typeof pwfFromDemand === 'number' ? pwfFromDemand : null)
 
-      summaries.push({
+      const normalizedElectricalPoint = normalizeOperatingPoint(
+        scenarioElectricalData?.[scenarioKey]?.metadata?.operating_point
+      )
+
+      const summaryEntry: any = {
         scenarioKey,
         flow: Number(targetFlow),
         head: headValue,
@@ -994,7 +1181,30 @@ export default function App() {
         intersectionFlow,
         intersectionHead: intersectionHeadValue,
         intersectionPwf
-      })
+      }
+
+      if (normalizedElectricalPoint) {
+        const merged = {
+          flow: normalizedElectricalPoint.flow,
+          head: normalizedElectricalPoint.head,
+          efficiency: normalizedElectricalPoint.efficiency ?? normalizedElectricalPoint.efficiencyFraction,
+          bhp: normalizedElectricalPoint.bhp,
+          pip: normalizedElectricalPoint.pip,
+          pwf: normalizedElectricalPoint.pwf,
+          fluidLevel: normalizedElectricalPoint.fluidLevel,
+          submergence: normalizedElectricalPoint.submergence,
+          friction: normalizedElectricalPoint.friction,
+          frequency: normalizedElectricalPoint.frequency
+        }
+
+        Object.entries(merged).forEach(([key, value]) => {
+          if (value !== null && value !== undefined) {
+            summaryEntry[key] = value
+          }
+        })
+      }
+
+      summaries.push(summaryEntry)
     })
 
     return summaries
@@ -1006,8 +1216,82 @@ export default function App() {
     pressureDemandCurve,
     scenarioMeta,
     scenarioDisplayValues,
-    freq
+      freq,
+      scenarioElectricalData
   ])
+
+  const baseOperatingPoint = React.useMemo(
+    () => normalizeOperatingPoint(electricalData?.metadata?.operating_point),
+    [electricalData]
+  )
+
+  const scenarioElectricalOperatingPoints = React.useMemo(() => {
+    const entries = Object.entries(scenarioElectricalData || {})
+    if (!entries.length) {
+      return {}
+    }
+    const map: Record<string, any> = {}
+    entries.forEach(([key, value]) => {
+      const normalized = normalizeOperatingPoint(value?.metadata?.operating_point)
+      if (normalized) {
+        map[key] = normalized
+      }
+    })
+    return map
+  }, [scenarioElectricalData])
+
+  const scenarioOperatingPointMap = React.useMemo(() => {
+    const map: Record<string, any> = { ...scenarioElectricalOperatingPoints }
+
+    if (!sensitivityEnabled) {
+      return map
+    }
+
+    scenarioOperatingSummary.forEach((entry) => {
+      if (!entry || !entry.scenarioKey) {
+        return
+      }
+
+      const flow = toFiniteNumber(entry.flow)
+      const head = toFiniteNumber(entry.head)
+
+      if (flow === null || head === null) {
+        return
+      }
+
+      const summaryPoint: Record<string, any> = {
+        flow,
+        head,
+        efficiency: toFiniteNumber(entry.efficiency),
+        bhp: toFiniteNumber(entry.bhp),
+        pip: toFiniteNumber(entry.pip),
+        pwf: toFiniteNumber(entry.pwf),
+        fluidLevel: toFiniteNumber(entry.fluidLevel ?? entry.nivel),
+        submergence: toFiniteNumber(entry.submergence),
+        friction: toFiniteNumber(entry.friction),
+        frequency: toFiniteNumber(entry.frequency)
+      }
+
+      const sanitized: Record<string, any> = {}
+      Object.entries(summaryPoint).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          sanitized[key] = value
+        }
+      })
+
+      const existing = map[entry.scenarioKey] || {}
+      map[entry.scenarioKey] = { ...existing, ...sanitized }
+    })
+
+    return map
+  }, [scenarioElectricalOperatingPoints, scenarioOperatingSummary, sensitivityEnabled])
+
+  const activeOperatingPoint = React.useMemo(() => {
+    if (sensitivityEnabled && primaryScenarioKey) {
+      return scenarioOperatingPointMap[primaryScenarioKey] || baseOperatingPoint
+    }
+    return baseOperatingPoint
+  }, [sensitivityEnabled, primaryScenarioKey, scenarioOperatingPointMap, baseOperatingPoint])
 
   const handleNumPumpsDesignChange = (newCount: number) => {
     setNumPumpsDesign(newCount)
@@ -1405,63 +1689,14 @@ export default function App() {
       }))
       setIndividualCurves(individualData)
       
-      // Sumar las curvas
-      if (allCurves.length === 1) {
+      const combined = buildCombinedPumpCurves(allCurves)
+
+      if (combined) {
+        setCombinedCurves(combined)
+      } else if (allCurves.length > 0) {
         setCombinedCurves(allCurves[0])
       } else {
-        // Encontrar el caudal máximo común
-        const maxQs = allCurves.map(c => Math.max(...c.head.map((p: any) => p.caudal)))
-        const minMaxQ = Math.min(...maxQs)
-        
-        // Crear curvas combinadas punto por punto
-        const combinedHead: any[] = []
-        const combinedBhp: any[] = []
-        const combinedEfficiency: any[] = []
-        
-        // Usar los puntos de caudal de la primera bomba como referencia
-        const referenceCaudals = allCurves[0].head.map((p: any) => p.caudal).filter((q: number) => q <= minMaxQ)
-        
-        referenceCaudals.forEach((q: number) => {
-          let sumHead = 0
-          let sumBhp = 0
-          
-          // Sumar valores de todas las bombas para este caudal
-          allCurves.forEach(curve => {
-            // Encontrar el valor más cercano a este caudal
-            const headPoint = curve.head.find((p: any) => Math.abs(p.caudal - q) < 0.1) || 
-                             curve.head.reduce((prev: any, curr: any) => 
-                               Math.abs(curr.caudal - q) < Math.abs(prev.caudal - q) ? curr : prev
-                             )
-            const bhpPoint = curve.bhp.find((p: any) => Math.abs(p.caudal - q) < 0.1) || 
-                            curve.bhp.reduce((prev: any, curr: any) => 
-                              Math.abs(curr.caudal - q) < Math.abs(prev.caudal - q) ? curr : prev
-                            )
-            
-            sumHead += headPoint.valor
-            sumBhp += bhpPoint.valor
-          })
-          
-          // Calcular eficiencia combinada: η = (Q * H) / (6570 * BHP)
-          const efficiency = sumBhp > 0 ? (q * sumHead) / (6570 * sumBhp) : 0
-          
-          combinedHead.push({ caudal: q, valor: sumHead })
-          combinedBhp.push({ caudal: q, valor: sumBhp })
-          combinedEfficiency.push({ caudal: q, valor: efficiency })
-        })
-        
-        // Calcular rango operativo combinado
-        const minQs = allCurves.map(c => c.operating_range?.min_q || 0)
-        const maxQs2 = allCurves.map(c => c.operating_range?.max_q || 0)
-        
-        setCombinedCurves({
-          head: combinedHead,
-          bhp: combinedBhp,
-          efficiency: combinedEfficiency,
-          operating_range: {
-            min_q: Math.max(...minQs), // El mínimo es el mayor de los mínimos
-            max_q: Math.min(...maxQs2)  // El máximo es el menor de los máximos
-          }
-        })
+        setCombinedCurves(null)
       }
     } catch (e: any) {
       setError(e?.response?.data?.error || e.message)
@@ -2615,6 +2850,28 @@ export default function App() {
       }
     })
 
+    const combinedTdhOverlay = sensitivityEnabled && scenarioOperatingPoints.length > 0
+      ? {
+          scenarioOperatingPoints,
+          demandCurves: pressureDemandScenarios,
+          fallbackDemandCurve: pressureDemandCurve,
+          scenarioMeta
+        }
+      : null
+
+    const hasScenarioPumpCurves = Object.keys(scenarioPumpCurves || {}).length > 0
+    const sensitivityPumpPayload = hasScenarioPumpCurves
+      ? {
+          pumpCurves: scenarioPumpCurves,
+          demandCurves: pressureDemandScenarios,
+          fallbackDemandCurve: pressureDemandCurve,
+          scenarioMeta,
+          operatingPoints: scenarioOperatingPoints,
+          scenarioOrder: availableScenarioKeys,
+          scenarioStyles
+        }
+      : null
+
     const renderScenarioOperatingTable = () => {
       if (!sensitivityEnabled || displayScenarioKeys.length === 0) {
         return null
@@ -3127,7 +3384,7 @@ export default function App() {
           return <div className="empty-state">Calculating sensitivity curves…</div>
         }
 
-        if (Object.keys(scenarioPumpCurves || {}).length > 0) {
+        if (sensitivityPumpPayload) {
           return (
             <>
               <div className="panel-card panel-card--no-padding">
@@ -3137,15 +3394,7 @@ export default function App() {
                   curves={null}
                   iprData={null}
                   showIPR={false}
-                  sensitivityPumpData={{
-                    pumpCurves: scenarioPumpCurves,
-                    demandCurves: pressureDemandScenarios,
-                    fallbackDemandCurve: pressureDemandCurve,
-                    scenarioMeta,
-                    operatingPoints: scenarioOperatingPoints,
-                    scenarioOrder: availableScenarioKeys,
-                    scenarioStyles
-                  }}
+                  sensitivityPumpData={sensitivityPumpPayload}
                 />
               </div>
               {renderScenarioOperatingTable()}
@@ -3176,6 +3425,45 @@ export default function App() {
     }
 
     const hasIndividual = individualCurves.length > 1
+    const hasDemandDataForSensitivity = Boolean(pressureDemandCurve) || Object.keys(pressureDemandScenarios || {}).length > 0
+
+    const renderCombinedSubtabContent = () => {
+      if (!sensitivityEnabled) {
+        return (
+          <CurvePlot
+            {...scenarioPlotProps}
+            operatingPoint={activeOperatingPoint}
+            curves={combinedCurves}
+            iprData={null}
+            showIPR={false}
+            tdhOverlayData={combinedTdhOverlay || undefined}
+          />
+        )
+      }
+
+      if (!hasDemandDataForSensitivity) {
+        return <div className="empty-state">Run the IPR calculation to generate the scenario overlays.</div>
+      }
+
+      if (scenarioPumpLoading) {
+        return <div className="empty-state">Calculating sensitivity curves…</div>
+      }
+
+      if (sensitivityPumpPayload) {
+        return (
+          <CurvePlot
+            {...scenarioPlotProps}
+            operatingPoint={activeOperatingPoint}
+            curves={null}
+            iprData={null}
+            showIPR={false}
+            sensitivityPumpData={sensitivityPumpPayload}
+          />
+        )
+      }
+
+      return <div className="empty-state">No sensitivity data available for the current configuration.</div>
+    }
 
     return (
       <>
@@ -3209,15 +3497,7 @@ export default function App() {
             </div>
           )}
           <div className="subtab-content">
-            {(!hasIndividual || pumpCurvesTab === 'combined') && (
-              <CurvePlot
-                {...scenarioPlotProps}
-                operatingPoint={activeOperatingPoint}
-                curves={combinedCurves}
-                iprData={null}
-                showIPR={false}
-              />
-            )}
+            {(!hasIndividual || pumpCurvesTab === 'combined') && renderCombinedSubtabContent()}
             {hasIndividual && pumpCurvesTab === 'efficiency' && (
               <CurvePlot
                 {...scenarioPlotProps}

@@ -169,62 +169,114 @@ def calculate_ipr_linear(well_data):
 
 def calculate_ipr_vogel(well_data):
     """
-    IPR de Vogel: Q/Qmax = 1 - 0.2*(Pwf/Pr) - 0.8*(Pwf/Pr)^2
-    Válido para flujo bifásico (petróleo con gas en solución).
+    IPR de Vogel compuesta (Standing) con soporte para reservorios saturados y sub-saturados.
     UNIDADES: Pr(bar), Pb(bar), Q(m³/d)
     """
-    pr = well_data.get('presion_reservorio', 150)  # bar
-    pb = well_data.get('presion_burbuja', pr * 0.8)  # Default: 80% de Pr
-    q_test = well_data.get('q_test', None)  # m³/d
-    pwf_test = well_data.get('pwf_test', None)  # bar
+    pr = well_data.get('presion_reservorio', 150)
+    pb = well_data.get('presion_burbuja', pr * 0.8)
+    q_test = well_data.get('q_test', None)
+    pwf_test = well_data.get('pwf_test', None)
     n_points = well_data.get('n_points', 50)
-    
-    # Parámetros del fluido
-    grado_api = well_data.get('grado_api', 30)  # °API
-    agua_porcentaje = well_data.get('agua_porcentaje', 0)  # %
-    gravedad_especifica_agua = well_data.get('gravedad_especifica_agua', 1.0)  # SG
-    
-    # Calcular gradiente del fluido
-    gradiente = calculate_fluid_gradient(grado_api, agua_porcentaje, gravedad_especifica_agua)  # bar/m
-    
-    # Si tenemos datos de prueba, calculamos Qmax
-    if q_test and pwf_test:
-        # Q/Qmax = 1 - 0.2*(Pwf/Pr) - 0.8*(Pwf/Pr)^2
-        ratio = pwf_test / pr
-        productivity_ratio = 1 - 0.2 * ratio - 0.8 * (ratio ** 2)
-        q_max = q_test / productivity_ratio if productivity_ratio > 0 else q_test * 2
-    else:
-        # Estimación si no hay datos de prueba
-        pi_estimate = well_data.get('pi', 5.0)  # m³/d/bar
-        q_max = pr * pi_estimate * 0.8  # Factor de ajuste para Vogel
-    
+
+    grado_api = well_data.get('grado_api', 30)
+    agua_porcentaje = well_data.get('agua_porcentaje', 0)
+    gravedad_especifica_agua = well_data.get('gravedad_especifica_agua', 1.0)
+
+    gradiente = calculate_fluid_gradient(grado_api, agua_porcentaje, gravedad_especifica_agua)
+    pi_default = well_data.get('pi', 5.0)
+
+    saturated_reservoir = pr <= pb
     ipr_curve = []
-    for i in range(n_points + 1):
-        pwf = pr * (1 - i / n_points)
-        
-        if pwf < 0:
-            pwf = 0
-        
-        # Ecuación de Vogel
-        ratio = pwf / pr
-        q = q_max * (1 - 0.2 * ratio - 0.8 * (ratio ** 2))
-        
-        if q < 0:
-            q = 0
-        
-        # Calcular nivel de fluido
-        nivel = pressure_to_level(pwf, pr, gradiente)
-            
-        ipr_curve.append({
-            "caudal": round(q, 2), 
-            "pwf": round(pwf, 2),
-            "nivel": round(nivel, 2)
-        })
-    
+    productivity_index = pi_default
+
+    if saturated_reservoir:
+        if q_test is not None and pwf_test is not None:
+            ratio = pwf_test / pr if pr else 0
+            productivity_ratio = 1 - 0.2 * ratio - 0.8 * (ratio ** 2)
+            if productivity_ratio > 0:
+                q_max = q_test / productivity_ratio
+            else:
+                q_max = q_test * 2
+            denom = pr - pwf_test
+            if denom > 0:
+                productivity_index = q_test / denom
+        else:
+            q_max = pr * pi_default * 0.8
+
+        for i in range(n_points + 1):
+            pwf = pr * (1 - i / n_points)
+            if pwf < 0:
+                pwf = 0
+
+            ratio = pwf / pr if pr else 0
+            q = q_max * (1 - 0.2 * ratio - 0.8 * (ratio ** 2))
+            if q < 0:
+                q = 0
+
+            nivel = pressure_to_level(pwf, pr, gradiente)
+            ipr_curve.append({
+                "caudal": round(q, 2),
+                "pwf": round(pwf, 2),
+                "nivel": round(nivel, 2)
+            })
+
+        method_label = 'Vogel (Bifásico - Saturado)'
+        q_max_output = q_max
+    else:
+        j_value = None
+        if q_test is not None and pwf_test is not None:
+            if pwf_test >= pb:
+                denom = pr - pwf_test
+                if denom > 0:
+                    j_value = q_test / denom
+            else:
+                denom = (pr - pb) + (pb / 1.8) * (
+                    1 - 0.2 * (pwf_test / pb) - 0.8 * ((pwf_test / pb) ** 2)
+                ) if pb else None
+                if denom and denom > 0:
+                    j_value = q_test / denom
+
+        if j_value is None or j_value <= 0:
+            j_value = pi_default
+
+        productivity_index = j_value
+        pb_safe = pb if pb > 0 else 1e-6
+        q_bubble = j_value * (pr - pb)
+
+        for i in range(n_points + 1):
+            pwf = pr * (1 - i / n_points)
+            if pwf < 0:
+                pwf = 0
+
+            if pwf >= pb:
+                q = j_value * (pr - pwf)
+            else:
+                ratio = pwf / pb_safe
+                q_vogel_part = (j_value * pb_safe / 1.8) * (
+                    1 - 0.2 * ratio - 0.8 * (ratio ** 2)
+                )
+                q = q_bubble + q_vogel_part
+
+            if q < 0:
+                q = 0
+
+            nivel = pressure_to_level(pwf, pr, gradiente)
+            ipr_curve.append({
+                "caudal": round(q, 2),
+                "pwf": round(pwf, 2),
+                "nivel": round(nivel, 2)
+            })
+
+        q_vogel_aof = (j_value * pb_safe / 1.8)
+        q_max_output = q_bubble + q_vogel_aof
+        method_label = 'Vogel (Bifásico - Compuesta)'
+
+    q_max_output = max(q_max_output, 0)
+
     return {
-        'method': 'Vogel (Bifásico)',
+        'method': method_label,
         'curve': ipr_curve,
-        'q_max': round(q_max, 2),
+        'q_max': round(q_max_output, 2),
         'parameters': {
             'pr': pr,
             'pb': pb,
@@ -232,7 +284,8 @@ def calculate_ipr_vogel(well_data):
             'pwf_test': pwf_test,
             'gradiente': round(gradiente, 5),
             'grado_api': grado_api,
-            'agua_porcentaje': agua_porcentaje
+            'agua_porcentaje': agua_porcentaje,
+            'productivity_index': round(productivity_index, 5)
         }
     }
 

@@ -31,6 +31,7 @@ Resumen de cambios recientes
 - Nuevo endpoint GET `/api/column-mapping` que devuelve el mapeo detectado.
 - Mejor manejo de errores: endpoints de curvas y validación devuelven 404 cuando el equipo no se encuentra.
 - Suite de tests (`pytest`) añadida y validada (tests básicos para IPR y curvas).
+- Sincronización de puntos de operación entre backend y frontend (tablas, gráficas y exportaciones); detalles en `docs/operating-point-synchronization.md`.
 
 Estructura del Proyecto
 

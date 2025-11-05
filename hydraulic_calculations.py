@@ -132,7 +132,7 @@ def calculate_tdh_basic(well_data, caudal_m3d):
     profundidad_intake = well_data.get('profundidad_intake', 1500)  # m
     nivel_fluido = well_data.get('nivel_fluido_dinamico', 500)  # m desde superficie
     presion_superficie = well_data.get('presion_superficie', 10)  # bar
-    presion_casing = well_data.get('presion_casing', 5)  # bar
+    presion_casing = well_data.get('presion_casing', 1)  # bar
     
     # Calcular propiedades del fluido
     fluid_props = calculate_fluid_properties(well_data)
@@ -234,7 +234,7 @@ def calculate_pressure_demand_curve(well_data, ipr_data=None):
     # Extraer parámetros
     profundidad_bomba = well_data.get('profundidad_intake', 1500)  # m (PD)
     presion_superficie = well_data.get('presion_superficie', 10)  # bar (TP)
-    presion_casing = well_data.get('presion_casing', 0)  # bar (Pcasing)
+    presion_casing = well_data.get('presion_casing', 1)  # bar (Pcasing)
     
     # Parámetros de tubería para cálculo de fricción
     tubing_id_mm = well_data.get('tubing_id_mm', 62.0)  # Diámetro interno en mm

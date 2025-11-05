@@ -159,6 +159,89 @@ function resolveScenarioStyle(key: string, scenarioStyles?: any) {
   return merged
 }
 
+function buildScenarioTdHOverlayTraces({
+  scenarioKey,
+  style,
+  demandSource,
+  legendGroup,
+  operatingPoint,
+  frequency,
+  includeDemandLegend,
+  includePointLegend
+}: {
+  scenarioKey: string
+  style: any
+  demandSource: any
+  legendGroup: string
+  operatingPoint?: any
+  frequency?: number | null
+  includeDemandLegend: boolean
+  includePointLegend: boolean
+}) {
+  const traces: any[] = []
+  const label = style?.label || formatScenarioLabel(scenarioKey)
+  const demandCurve = Array.isArray(demandSource?.curve) ? demandSource.curve : null
+
+  if (demandCurve && demandCurve.length > 0) {
+    traces.push({
+      x: demandCurve.map((point: any) => point.caudal),
+      y: demandCurve.map((point: any) => point.tdh),
+      type: 'scatter',
+      mode: 'lines',
+      name: `${label} Demand`,
+      line: { color: style?.color, width: 1.4, dash: 'dash' },
+      legendgroup: legendGroup,
+      showlegend: includeDemandLegend,
+      hovertemplate:
+        `<b>${label} Demand</b><br>` +
+        'Q: %{x:.2f} m³/d<br>' +
+        'TDH: %{y:.2f} m<extra></extra>'
+    })
+  }
+
+  if (
+    operatingPoint &&
+    typeof operatingPoint.flow === 'number' &&
+    Number.isFinite(operatingPoint.flow) &&
+    typeof operatingPoint.head === 'number' &&
+    Number.isFinite(operatingPoint.head)
+  ) {
+    const frequencyValue =
+      typeof frequency === 'number' && Number.isFinite(frequency)
+        ? frequency
+        : typeof operatingPoint.frequency === 'number' && Number.isFinite(operatingPoint.frequency)
+          ? operatingPoint.frequency
+          : null
+
+    traces.push({
+      x: [operatingPoint.flow],
+      y: [operatingPoint.head],
+      type: 'scatter',
+      mode: 'markers',
+      name: `${label} Operating Point`,
+      marker: {
+        size: 11,
+        color: style?.color,
+        symbol: 'x',
+        line: { color: '#ffffff', width: 1.1 }
+      },
+      legendgroup: legendGroup,
+      showlegend: includePointLegend,
+      hovertemplate:
+        `<b>${label} Operating Point</b><br>` +
+        `Q: %{x:.2f} m³/d<br>` +
+        `TDH: %{y:.2f} m` +
+        (typeof operatingPoint.pwf === 'number' && Number.isFinite(operatingPoint.pwf)
+          ? `<br>Pwf: ${operatingPoint.pwf.toFixed(2)} bar`
+          : '') +
+        (frequencyValue !== null ? `<br>Frequency: ${frequencyValue.toFixed(1)} Hz` : '') +
+        '<extra></extra>'
+    })
+  }
+
+  return traces
+}
+
 export default function CurvePlot({
   curves,
   multiFreqData,
@@ -186,7 +269,8 @@ export default function CurvePlot({
   scenarioOrder,
   activeScenarioKey,
   hideDemandWithinIPR,
-  operatingPoint
+  operatingPoint,
+  tdhOverlayData
 }: any) {
   if (isDemandMode) {
     return (
@@ -653,6 +737,63 @@ export default function CurvePlot({
     })
   }
 
+  if (
+    tdhOverlayData &&
+    Array.isArray(tdhOverlayData.scenarioOperatingPoints) &&
+    tdhOverlayData.scenarioOperatingPoints.length > 0
+  ) {
+    const demandMap = tdhOverlayData.demandCurves || {}
+    const fallbackDemand = tdhOverlayData.fallbackDemandCurve
+    const overlayMeta = tdhOverlayData.scenarioMeta || {}
+    const points = tdhOverlayData.scenarioOperatingPoints
+
+    const orderedKeys = Array.isArray(scenarioOrder) && scenarioOrder.length > 0
+      ? scenarioOrder
+      : Array.from(
+          new Set([
+            ...Object.keys(demandMap || {}),
+            ...points.map((entry: any) => entry?.scenarioKey).filter(Boolean)
+          ])
+        )
+
+    orderedKeys.forEach((scenarioKey: string) => {
+      if (!scenarioKey) {
+        return
+      }
+      if (
+        scenarioVisibility &&
+        Object.prototype.hasOwnProperty.call(scenarioVisibility, scenarioKey) &&
+        !scenarioVisibility[scenarioKey]
+      ) {
+        return
+      }
+
+      const demandSource = demandMap?.[scenarioKey] || fallbackDemand
+      const operatingPoint = points.find((entry: any) => entry?.scenarioKey === scenarioKey)
+      if (!demandSource && !operatingPoint) {
+        return
+      }
+
+      const style = resolveScenarioStyle(scenarioKey, scenarioStyles)
+      const metaFrequency = overlayMeta?.[scenarioKey]?.frequency ?? overlayMeta?.[scenarioKey]?.freq ?? null
+
+      const overlayTraces = buildScenarioTdHOverlayTraces({
+        scenarioKey,
+        style,
+        demandSource,
+        legendGroup: `scenario-${scenarioKey}`,
+        operatingPoint,
+        frequency: metaFrequency,
+        includeDemandLegend: true,
+        includePointLegend: false
+      })
+
+      if (overlayTraces.length > 0) {
+        data.push(...overlayTraces.map((trace: any) => ({ ...trace, yaxis: 'y1' })))
+      }
+    })
+  }
+
   if (plotOperatingPoint) {
     data.push({
       x: [plotOperatingPoint.q],
@@ -930,46 +1071,21 @@ function SensitivityPumpPlot({
     })
 
     const demandSource = demandCurves?.[key] || fallbackDemandCurve
-    const demandCurve = demandSource?.curve
-    if (Array.isArray(demandCurve) && demandCurve.length > 0) {
-      plotData.push({
-        x: demandCurve.map((point: any) => point.caudal),
-        y: demandCurve.map((point: any) => point.tdh),
-        type: 'scatter',
-        mode: 'lines',
-        name: `${style.label || formatScenarioLabel(key)} Demand`,
-        line: { color: style.color, width: 1.4, dash: 'dash' },
-        legendgroup: legendGroup,
-        showlegend: false,
-        hovertemplate: `<b>${style.label || formatScenarioLabel(key)} Demand</b><br>Q: %{x:.2f} m³/d<br>TDH: %{y:.2f} m<extra></extra>`
-      })
-    }
+    const overlayTraces = buildScenarioTdHOverlayTraces({
+      scenarioKey: key,
+      style,
+      demandSource,
+      legendGroup,
+      operatingPoint: Array.isArray(operatingPoints)
+        ? operatingPoints.find((point: any) => point?.scenarioKey === key)
+        : null,
+      frequency: typeof frequency === 'number' && Number.isFinite(frequency) ? frequency : null,
+      includeDemandLegend: false,
+      includePointLegend: false
+    })
 
-    const opPoint = Array.isArray(operatingPoints)
-      ? operatingPoints.find((point: any) => point?.scenarioKey === key)
-      : null
-
-    if (opPoint && typeof opPoint.flow === 'number' && typeof opPoint.head === 'number') {
-      plotData.push({
-        x: [opPoint.flow],
-        y: [opPoint.head],
-        type: 'scatter',
-        mode: 'markers',
-        name: `${style.label || formatScenarioLabel(key)} Operating Point`,
-        marker: {
-          size: 11,
-          color: style.color,
-          symbol: 'x',
-          line: { color: '#ffffff', width: 1.1 }
-        },
-        legendgroup: legendGroup,
-        hovertemplate: `<b>${style.label || formatScenarioLabel(key)} Operating Point</b><br>` +
-          `Q: %{x:.2f} m³/d<br>` +
-          `TDH: %{y:.2f} m` +
-          (typeof opPoint.pwf === 'number' ? `<br>Pwf: ${opPoint.pwf.toFixed(2)} bar` : '') +
-          (typeof frequency === 'number' ? `<br>Frequency: ${frequency.toFixed(1)} Hz` : '') +
-          '<extra></extra>'
-      })
+    if (overlayTraces.length > 0) {
+      plotData.push(...overlayTraces)
     }
   })
 

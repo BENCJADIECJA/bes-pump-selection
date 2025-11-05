@@ -74,7 +74,7 @@ def test_tdh_calculation():
         "profundidad_intake": 1500,
         "nivel_fluido_dinamico": 500,
         "presion_superficie": 10,
-        "presion_casing": 5,
+        "presion_casing": 1,
         "tubing_id_mm": 62.0,
         "tubing_roughness": "acero_nuevo"
     }
