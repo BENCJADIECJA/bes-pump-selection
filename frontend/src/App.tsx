@@ -1,5 +1,5 @@
 // @ts-nocheck
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import * as XLSX from 'xlsx'
 import PumpSelector from './components/PumpSelector'
@@ -18,38 +18,54 @@ const DEFAULT_SCENARIO_STYLES = {
 }
 const FALLBACK_SCENARIO_STYLE = { label: 'System Demand', color: '#c0392b', dash: 'dot', symbol: 'star' }
 
-const DEFAULT_MOTOR_ID = 'N406AM130 2400V SGL'
-const DEFAULT_MLE_CABLE_ID = 'awg_6'
-const DEFAULT_DOWNHOLE_CABLE_ID = 'awg_4'
-const DEFAULT_SURFACE_CABLE_ID = 'awg_4'
-const DEFAULT_MLE_LENGTH_METERS = 20
-const DEFAULT_SURFACE_LENGTH_METERS = 70
+// Default equipment selections and surface design parameters used to seed the UI before catalogs load
+const DEFAULT_MOTOR_ID: string | null = null
+const DEFAULT_MLE_CABLE_ID: string | null = null
+const DEFAULT_DOWNHOLE_CABLE_ID: string | null = null
+const DEFAULT_SURFACE_CABLE_ID: string | null = null
 
-type ScenarioOverride = {
-  freq?: number
-  qTest?: number
-  pwfTest?: number
-}
+const DEFAULT_MLE_LENGTH_METERS = 400
+const DEFAULT_SURFACE_LENGTH_METERS = 60
 
-type ScenarioDisplayValues = {
-  freq: number
-  qTest: number
-  pwfTest: number
-  lockFlow?: boolean
-  lockPwf?: boolean
-}
+const DEFAULT_SURFACE_DESIGN_MODE: 'vsd' | 'tablero' = 'vsd'
+const DEFAULT_SURFACE_FREQ_MAX = 60
+const DEFAULT_SURFACE_VOLTAGE = 460
+const DEFAULT_SURFACE_GRID_FREQ = 60
+const DEFAULT_SURFACE_BOARD_MARGIN = 5
+
+const DEFAULT_TRAFO_PRIMARY_V = 480
+const DEFAULT_TRAFO_SECONDARY_V = 2400
+const DEFAULT_TRAFO_IMPEDANCE = 6
+
+const DEFAULT_FILTER_RESISTANCE = 0.005
+const DEFAULT_FILTER_INDUCTANCE = 0.0001
+
+const DEFAULT_VSD_EFFICIENCY = 0.97
+const DEFAULT_VSD_POWER_FACTOR = 0.96
 
 const interpolateValue = (qArray: number[], valueArray: number[], targetQ: number) => {
-  if (!qArray || !valueArray || qArray.length === 0 || valueArray.length === 0) return null
-  if (targetQ <= qArray[0]) return valueArray[0]
-  if (targetQ >= qArray[qArray.length - 1]) return valueArray[valueArray.length - 1]
+  if (!Array.isArray(qArray) || !Array.isArray(valueArray) || qArray.length === 0 || valueArray.length === 0) {
+    return null
+  }
 
-  for (let i = 0; i < qArray.length - 1; i++) {
-    const q1 = qArray[i]
-    const q2 = qArray[i + 1]
-    if (targetQ >= q1 && targetQ <= q2 && q2 !== q1) {
-      const v1 = valueArray[i]
-      const v2 = valueArray[i + 1]
+  if (targetQ <= qArray[0]) {
+    return valueArray[0]
+  }
+
+  if (targetQ >= qArray[qArray.length - 1]) {
+    return valueArray[valueArray.length - 1]
+  }
+
+  for (let index = 0; index < qArray.length - 1; index += 1) {
+    const q1 = qArray[index]
+    const q2 = qArray[index + 1]
+    if (q2 === q1) {
+      continue
+    }
+
+    if (targetQ >= q1 && targetQ <= q2) {
+      const v1 = valueArray[index]
+      const v2 = valueArray[index + 1]
       const fraction = (targetQ - q1) / (q2 - q1)
       return v1 + fraction * (v2 - v1)
     }
@@ -58,20 +74,38 @@ const interpolateValue = (qArray: number[], valueArray: number[], targetQ: numbe
   return null
 }
 
-const findPumpDemandIntersection = (pumpQ: number[], pumpHead: number[], demandQ: number[], demandHead: number[]) => {
-  if (!pumpQ || !pumpHead || !demandQ || !demandHead) return null
+const findPumpDemandIntersection = (
+  pumpQ: number[],
+  pumpHead: number[],
+  demandQ: number[],
+  demandHead: number[]
+) => {
+  if (
+    !Array.isArray(pumpQ) ||
+    !Array.isArray(pumpHead) ||
+    !Array.isArray(demandQ) ||
+    !Array.isArray(demandHead) ||
+    pumpQ.length === 0 ||
+    demandQ.length === 0
+  ) {
+    return null
+  }
 
-  for (let i = 0; i < pumpQ.length - 1; i++) {
-    const q1 = pumpQ[i]
-    const q2 = pumpQ[i + 1]
-    if (q2 === q1) continue
+  for (let index = 0; index < pumpQ.length - 1; index += 1) {
+    const q1 = pumpQ[index]
+    const q2 = pumpQ[index + 1]
+    if (q2 === q1) {
+      continue
+    }
 
-    const pumpHead1 = pumpHead[i]
-    const pumpHead2 = pumpHead[i + 1]
+    const pumpHead1 = pumpHead[index]
+    const pumpHead2 = pumpHead[index + 1]
     const demandHead1 = interpolateValue(demandQ, demandHead, q1)
     const demandHead2 = interpolateValue(demandQ, demandHead, q2)
 
-    if (demandHead1 === null || demandHead2 === null) continue
+    if (demandHead1 === null || demandHead2 === null) {
+      continue
+    }
 
     const diff1 = pumpHead1 - demandHead1
     const diff2 = pumpHead2 - demandHead2
@@ -326,7 +360,7 @@ export default function App() {
   const [isPumpManagerOpen, setPumpManagerOpen] = useState(false)
   
   // Estado para controlar pestañas
-  const [configTab, setConfigTab] = useState<'motor' | 'cable' | 'pump' | 'installation' | 'ipr'>('motor')
+  const [configTab, setConfigTab] = useState<'ipr' | 'installation' | 'pump' | 'motor' | 'cable' | 'surface'>('ipr')
   const [visualTab, setVisualTab] = useState<'curves' | 'ipr' | 'demand' | 'electrical'>('curves')
   const [pumpCurvesTab, setPumpCurvesTab] = useState<'combined' | 'efficiency' | 'head' | 'bhp'>('combined')
   
@@ -407,6 +441,26 @@ export default function App() {
   const prevSensitivityEnabledRef = useRef(false)
   const [electricalData, setElectricalData] = useState<any>(null)
   const [scenarioElectricalData, setScenarioElectricalData] = useState<Record<string, any>>({})
+  const [surfaceDesignMode, setSurfaceDesignMode] = useState<'vsd' | 'tablero'>(DEFAULT_SURFACE_DESIGN_MODE)
+  const [surfaceDesignFreqMax, setSurfaceDesignFreqMax] = useState<number>(DEFAULT_SURFACE_FREQ_MAX)
+  const [surfaceDesignVoltage, setSurfaceDesignVoltage] = useState<number>(DEFAULT_SURFACE_VOLTAGE)
+  const [surfaceGridFrequency, setSurfaceGridFrequency] = useState<number>(DEFAULT_SURFACE_GRID_FREQ)
+  const [surfaceBoardMargin, setSurfaceBoardMargin] = useState<number>(DEFAULT_SURFACE_BOARD_MARGIN)
+  const [surfaceTransformerPrimary, setSurfaceTransformerPrimary] = useState<number>(DEFAULT_TRAFO_PRIMARY_V)
+  const [surfaceTransformerSecondary, setSurfaceTransformerSecondary] = useState<number>(DEFAULT_TRAFO_SECONDARY_V)
+  const [surfaceTransformerImpedance, setSurfaceTransformerImpedance] = useState<number>(DEFAULT_TRAFO_IMPEDANCE)
+  const [surfaceFilterResistance, setSurfaceFilterResistance] = useState<number>(DEFAULT_FILTER_RESISTANCE)
+  const [surfaceFilterInductance, setSurfaceFilterInductance] = useState<number>(DEFAULT_FILTER_INDUCTANCE)
+  const [surfaceVsdEfficiency, setSurfaceVsdEfficiency] = useState<number>(DEFAULT_VSD_EFFICIENCY)
+  const [surfaceVsdPowerFactor, setSurfaceVsdPowerFactor] = useState<number>(DEFAULT_VSD_POWER_FACTOR)
+  const [surfaceDesignLoading, setSurfaceDesignLoading] = useState(false)
+  const [surfaceDesignError, setSurfaceDesignError] = useState<string | null>(null)
+  const [surfaceDesignResult, setSurfaceDesignResult] = useState<any>(null)
+  const [surfaceVhzEditablePoints, setSurfaceVhzEditablePoints] = useState<Array<{ f: number; v: number }>>([])
+  const [collapseBaseElectrical, setCollapseBaseElectrical] = useState(false)
+  const [collapseSurfaceDesign, setCollapseSurfaceDesign] = useState(false)
+  const [collapseScenarioElectrical, setCollapseScenarioElectrical] = useState(false)
+  const [collapseSurfaceVhz, setCollapseSurfaceVhz] = useState(false)
 
   const motorCatalogById = useMemo(() => {
     const mapping: Record<string, any> = {}
@@ -1775,6 +1829,8 @@ export default function App() {
     setError(null)
     setElectricalData(null)
     setScenarioElectricalData({})
+    setSurfaceDesignResult(null)
+    setSurfaceDesignError(null)
     try {
       const wellData = {
         method: iprMethod,
@@ -1934,7 +1990,7 @@ export default function App() {
         const allScenarioKeys = new Set<string>([...nextScenarioOrder, ...DEFAULT_SCENARIO_ORDER])
         Object.keys(combinedScenarioCurves || {}).forEach((key) => allScenarioKeys.add(key))
         Object.keys(normalizedIprScenarios || {}).forEach((key) => allScenarioKeys.add(key))
-  Object.keys(scenarioOverridesPayload || {}).forEach((key) => allScenarioKeys.add(key))
+        Object.keys(scenarioOverridesPayload || {}).forEach((key) => allScenarioKeys.add(key))
 
         const nextScenarioCurves: Record<string, any> = {}
         allScenarioKeys.forEach((key) => {
@@ -1988,6 +2044,205 @@ export default function App() {
       setError(e?.response?.data?.error || e.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleCalculateSurfaceDesign() {
+    if (surfaceDesignLoading) {
+      return
+    }
+
+    const errors: string[] = []
+
+    if (!selectedMotorEntry) {
+      errors.push('Select a motor before running the surface design calculation.')
+    }
+
+    const parseNumber = (value: any): number | null => {
+      if (value === undefined || value === null) {
+        return null
+      }
+      if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null
+      }
+      if (typeof value === 'string') {
+        const normalized = value.replace(',', '.').trim()
+        if (!normalized) {
+          return null
+        }
+        const numeric = Number(normalized)
+        return Number.isFinite(numeric) ? numeric : null
+      }
+      return null
+    }
+
+    const resolvePositiveNumber = (value: any): number | null => {
+      if (value === undefined || value === null) {
+        return null
+      }
+      const numeric = typeof value === 'number' ? value : Number(value)
+      if (!Number.isFinite(numeric)) {
+        return null
+      }
+      return numeric > 0 ? numeric : null
+    }
+
+    const motorVoltage = parseNumber(pickEntryValue(selectedMotorEntry, ['VOLT NOM', 'volt_nom', 'Voltaje', 'VOLT']))
+    const motorCurrent = parseNumber(pickEntryValue(selectedMotorEntry, ['AMP NOM', 'amp_nom', 'Amperaje']))
+    let motorPf = parseNumber(pickEntryValue(selectedMotorEntry, ['COS FI NOM', 'cos_fi_nom', 'Cos Fi']))
+    const motorFrequency = parseNumber(pickEntryValue(selectedMotorEntry, ['HZ NOM', 'hz_nom', 'Hz']))
+
+    if (motorVoltage === null || motorVoltage <= 0) {
+      errors.push('Motor catalog entry is missing a valid nominal voltage value.')
+    }
+    if (motorCurrent === null || motorCurrent <= 0) {
+      errors.push('Motor catalog entry is missing a valid nominal current value.')
+    }
+    if (motorPf !== null && motorPf > 1.5) {
+      motorPf = motorPf / 100.0
+    }
+    if (motorPf === null || motorPf <= 0) {
+      errors.push('Motor catalog entry is missing a valid power factor value.')
+    }
+    if (motorFrequency === null || motorFrequency <= 0) {
+      errors.push('Motor catalog entry is missing a valid nominal frequency value.')
+    }
+
+    const cableResistance = parseNumber(electricalData?.metadata?.cable_resistance_ohm)
+    if (cableResistance === null || cableResistance <= 0) {
+      errors.push('Run the base calculation to refresh the electrical summary before sizing surface equipment.')
+    }
+
+    if (surfaceDesignMode === 'vsd') {
+      if (!surfaceDesignVoltage || surfaceDesignVoltage <= 0) {
+        errors.push('Provide a positive configured VSD output voltage.')
+      }
+      if (!surfaceVsdEfficiency || surfaceVsdEfficiency <= 0 || surfaceVsdEfficiency > 1.2) {
+        errors.push('Set a realistic VSD efficiency (0 < eff ≤ 1).')
+      }
+      if (!surfaceVsdPowerFactor || surfaceVsdPowerFactor <= 0 || surfaceVsdPowerFactor > 1.2) {
+        errors.push('Set a realistic VSD input power factor (0 < PF ≤ 1).')
+      }
+      if (!surfaceFilterResistance || surfaceFilterResistance <= 0) {
+        errors.push('Provide a positive filter resistance value.')
+      }
+      if (!surfaceFilterInductance || surfaceFilterInductance <= 0) {
+        errors.push('Provide a positive filter inductance value.')
+      }
+    } else {
+      if (!surfaceGridFrequency || surfaceGridFrequency <= 0) {
+        errors.push('Provide a positive grid frequency for the switchboard design.')
+      }
+      if (surfaceBoardMargin === null || surfaceBoardMargin < 0) {
+        errors.push('Surface voltage margin cannot be negative.')
+      }
+    }
+
+    if (!surfaceTransformerPrimary || surfaceTransformerPrimary <= 0) {
+      errors.push('Provide the transformer primary nominal voltage.')
+    }
+    if (!surfaceTransformerSecondary || surfaceTransformerSecondary <= 0) {
+      errors.push('Provide the transformer secondary nominal voltage.')
+    }
+    if (!surfaceTransformerImpedance || surfaceTransformerImpedance <= 0) {
+      errors.push('Provide the transformer impedance percentage.')
+    }
+
+    const baseFrequencyValue = resolvePositiveNumber(freq)
+    const optimisticFrequencyValue =
+      resolvePositiveNumber(scenarioDisplayValues?.optimistic?.freq) ??
+      resolvePositiveNumber(scenarioMeta?.optimistic?.frequency) ??
+      baseFrequencyValue
+    const gridFrequencyValue = resolvePositiveNumber(surfaceGridFrequency)
+
+    let calculationFrequency: number | null = null
+    if (surfaceDesignMode === 'tablero') {
+      calculationFrequency = gridFrequencyValue
+    } else {
+      calculationFrequency = sensitivityEnabled ? optimisticFrequencyValue : baseFrequencyValue
+    }
+
+    if (!calculationFrequency) {
+      errors.push('Unable to resolve a valid operating frequency for the surface design calculation.')
+    }
+
+    if (errors.length > 0) {
+      setSurfaceDesignError(errors.join(' '))
+      setSurfaceDesignResult(null)
+      return
+    }
+
+    if (surfaceDesignMode === 'vsd' && calculationFrequency) {
+      setSurfaceDesignFreqMax(calculationFrequency)
+    }
+
+    const motorPlate = {
+      v_nom: motorVoltage!,
+      i_nom: motorCurrent!,
+      pf_nom: motorPf!,
+      f_nom: motorFrequency!
+    }
+
+    const designConfig: any = {
+      tipo_accionamiento: surfaceDesignMode,
+      f_max_operativa: calculationFrequency,
+      v_vsd_out_configurada: surfaceDesignMode === 'vsd' ? surfaceDesignVoltage : 0,
+      f_red: gridFrequencyValue ?? DEFAULT_SURFACE_GRID_FREQ,
+      margen_tension_tablero: surfaceDesignMode === 'tablero' ? surfaceBoardMargin : 0
+    }
+
+    const catalogoEquipos: any = {
+      transformador: {
+        v_primario_nom: surfaceTransformerPrimary,
+        v_secundario_nom: surfaceTransformerSecondary,
+        impedancia_z_porc: surfaceTransformerImpedance
+      }
+    }
+
+    if (surfaceDesignMode === 'vsd') {
+      catalogoEquipos.filtro_lc = {
+        resistencia_r: surfaceFilterResistance,
+        inductancia_l: surfaceFilterInductance
+      }
+      catalogoEquipos.vsd = {
+        eficiencia: surfaceVsdEfficiency,
+        pf_entrada: surfaceVsdPowerFactor
+      }
+    }
+
+    const payload: any = {
+      motor_placa: motorPlate,
+      cable_seleccionado: {
+        r_total_ohms: cableResistance!
+      },
+      config_diseno_usuario: designConfig,
+      catalogo_equipos: catalogoEquipos
+    }
+
+    const inheritedWarnings = Array.isArray(electricalData?.warnings) ? electricalData.warnings : []
+    if (inheritedWarnings.length > 0) {
+      payload.warnings = inheritedWarnings
+    }
+
+    setSurfaceDesignLoading(true)
+    setSurfaceDesignError(null)
+    setSurfaceDesignResult(null)
+
+    try {
+      const response = await axios.post('/api/surface-design', payload)
+      const data = response.data || {}
+      if (data.success) {
+        setSurfaceDesignResult(data.result || null)
+      } else {
+        setSurfaceDesignResult(null)
+        setSurfaceDesignError(data.error || 'Surface design calculation failed.')
+      }
+    } catch (err: any) {
+      const message = err?.response?.data?.error || err?.message || 'Surface design calculation failed.'
+      setSurfaceDesignResult(null)
+      setSurfaceDesignError(message)
+    } finally {
+      setSurfaceDesignLoading(false)
     }
   }
   
@@ -2099,6 +2354,221 @@ export default function App() {
       setShowSensitivity(false)
     }
   }, [showIPR])
+
+  useEffect(() => {
+    const rawPoints = surfaceDesignResult?.vsd_calculado?.curva_v_hz_6_puntos
+    if (Array.isArray(rawPoints) && rawPoints.length) {
+      const sanitized = rawPoints
+        .map((entry: any) => ({
+          f: Number(entry?.f),
+          v: Number(entry?.v)
+        }))
+        .filter((entry) => Number.isFinite(entry.f) && Number.isFinite(entry.v))
+      setSurfaceVhzEditablePoints(sanitized)
+    } else {
+      setSurfaceVhzEditablePoints([])
+    }
+  }, [surfaceDesignResult])
+
+  const surfaceVhzDefaultPoints = useMemo(() => {
+    const rawPoints = surfaceDesignResult?.vsd_calculado?.curva_v_hz_6_puntos
+    if (!Array.isArray(rawPoints)) {
+      return []
+    }
+    return rawPoints
+      .map((entry: any) => {
+        const freq = Number(entry?.f)
+        const volt = Number(entry?.v)
+        if (!Number.isFinite(freq) || !Number.isFinite(volt)) {
+          return null
+        }
+        return { f: freq, v: volt }
+      })
+      .filter((entry): entry is { f: number; v: number } => Boolean(entry))
+  }, [surfaceDesignResult])
+
+  const surfaceVhzActivePoints = surfaceVhzEditablePoints.length
+    ? surfaceVhzEditablePoints
+    : surfaceVhzDefaultPoints
+
+  const hasSurfaceVhzRows = surfaceVhzActivePoints.length > 0
+  const hasSurfaceVhzChartData = surfaceVhzActivePoints.some(
+    (entry) => Number.isFinite(entry?.f) && Number.isFinite(entry?.v)
+  )
+
+  const renderSurfaceVhzChart = (points: Array<{ f: number; v: number }>) => {
+    if (!Array.isArray(points) || points.length === 0) {
+      return null
+    }
+
+    const usablePoints = points
+      .map((entry) => ({
+        freq: Number(entry?.f),
+        volt: Number(entry?.v)
+      }))
+      .filter((entry) => Number.isFinite(entry.freq) && Number.isFinite(entry.volt))
+      .sort((a, b) => a.freq - b.freq)
+
+    if (!usablePoints.length) {
+      return null
+    }
+
+    const width = 420
+    const height = 220
+    const padding = 48
+    const freqValues = usablePoints.map((entry) => entry.freq)
+    const voltValues = usablePoints.map((entry) => entry.volt)
+    const minFreq = Math.min(...freqValues)
+    const maxFreq = Math.max(...freqValues)
+    const minVolt = Math.min(Math.min(...voltValues), 0)
+    const maxVolt = Math.max(...voltValues)
+    const freqSpan = maxFreq - minFreq || 1
+    const voltSpan = maxVolt - minVolt || 1
+
+    const toCanvasPoint = (entry: { freq: number; volt: number }) => {
+      const x = padding + ((entry.freq - minFreq) / freqSpan) * (width - padding * 2)
+      const y = height - padding - ((entry.volt - minVolt) / voltSpan) * (height - padding * 2)
+      return { x, y }
+    }
+
+    const polylinePoints = usablePoints
+      .map((entry) => {
+        const { x, y } = toCanvasPoint(entry)
+        return `${x.toFixed(2)},${y.toFixed(2)}`
+      })
+      .join(' ')
+
+    const gridSteps = 5
+    const freqStep = freqSpan / gridSteps
+    const voltStep = voltSpan / gridSteps
+
+    const gridLines = []
+    for (let i = 0; i <= gridSteps; i += 1) {
+      const gridX = padding + ((freqStep * i) / freqSpan) * (width - padding * 2)
+      const gridY = height - padding - ((voltStep * i) / voltSpan) * (height - padding * 2)
+      gridLines.push({ gridX, gridY, index: i })
+    }
+
+    return (
+      <svg
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="V over Hz design curve"
+      >
+        <defs>
+          <linearGradient id="vhzGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#1f2a4a" stopOpacity="0.8" />
+            <stop offset="100%" stopColor="#101524" stopOpacity="0.8" />
+          </linearGradient>
+        </defs>
+        <rect x={0} y={0} width={width} height={height} fill="url(#vhzGradient)" rx={8} ry={8} />
+        {gridLines.map((line) => (
+          <g key={`grid-${line.index}`}>
+            <line
+              x1={padding}
+              x2={width - padding}
+              y1={line.gridY}
+              y2={line.gridY}
+              stroke="#2e3c5c"
+              strokeWidth={0.8}
+              strokeDasharray="4 6"
+            />
+            <line
+              x1={line.gridX}
+              x2={line.gridX}
+              y1={padding}
+              y2={height - padding}
+              stroke="#2e3c5c"
+              strokeWidth={0.8}
+              strokeDasharray="4 6"
+            />
+          </g>
+        ))}
+        <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#8896c1" strokeWidth={2} />
+        <line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="#8896c1" strokeWidth={2} />
+        <polyline points={polylinePoints} fill="none" stroke="#4fb0ff" strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />
+        {usablePoints.map((entry, idx) => {
+          const { x, y } = toCanvasPoint(entry)
+          return (
+            <g key={`vhz-point-${idx}`}>
+              <circle cx={x} cy={y} r={5} fill="#4fb0ff" stroke="#0f1729" strokeWidth={2} />
+              <text x={x} y={y - 10} fill="#dbe4ff" fontSize="11" textAnchor="middle">
+                {`${entry.volt.toFixed(0)} V`}
+              </text>
+            </g>
+          )
+        })}
+        {gridLines.map((line) => {
+          const freqLabel = (minFreq + freqStep * line.index).toFixed(1)
+          const voltLabel = (minVolt + voltStep * line.index).toFixed(0)
+          return (
+            <g key={`labels-${line.index}`}>
+              <text
+                x={line.gridX}
+                y={height - padding + 18}
+                fill="#9fb7ff"
+                fontSize="11"
+                textAnchor="middle"
+              >
+                {freqLabel}
+              </text>
+              <text
+                x={padding - 16}
+                y={line.gridY + 4}
+                fill="#9fb7ff"
+                fontSize="11"
+                textAnchor="end"
+              >
+                {voltLabel}
+              </text>
+            </g>
+          )
+        })}
+        <text x={width / 2} y={height - 12} fill="#dbe4ff" fontSize="12" textAnchor="middle" fontWeight={600}>
+          Frequency (Hz)
+        </text>
+        <text
+          x={16}
+          y={padding - 20}
+          fill="#dbe4ff"
+          fontSize="12"
+          textAnchor="start"
+          fontWeight={600}
+        >
+          Voltage (V)
+        </text>
+      </svg>
+    )
+  }
+
+  const handleSurfaceVhzPointChange = useCallback(
+    (index: number, field: 'f' | 'v', rawValue: string) => {
+      setSurfaceVhzEditablePoints((prev) => {
+        const seedSource = prev.length ? prev : surfaceVhzDefaultPoints
+        const seeded = seedSource.map((entry) => ({ ...entry }))
+        if (!seeded[index]) {
+          return seeded
+        }
+        const numericValue = rawValue.trim() === '' ? NaN : Number(rawValue)
+        seeded[index] = {
+          ...seeded[index],
+          [field]: numericValue
+        }
+        return seeded
+      })
+    },
+    [surfaceVhzDefaultPoints]
+  )
+
+  const resetSurfaceVhzPoints = useCallback(() => {
+    if (!surfaceVhzDefaultPoints.length) {
+      setSurfaceVhzEditablePoints([])
+      return
+    }
+    setSurfaceVhzEditablePoints(surfaceVhzDefaultPoints.map((entry) => ({ ...entry })))
+  }, [surfaceVhzDefaultPoints])
 
   useEffect(() => {
     if (!showIPR && visualTab !== 'curves') {
@@ -2712,6 +3182,409 @@ export default function App() {
           <div className="empty-state" style={{ marginTop: 12 }}>
             Cable catalog not available. Verify the backend catalogs endpoint.
           </div>
+        )}
+      </div>
+    )
+  }
+
+  const renderSurfaceDesignConfiguration = (): React.ReactNode => {
+    const cableResistanceValue = Number(electricalData?.metadata?.cable_resistance_ohm)
+    const cableResistanceDisplay = Number.isFinite(cableResistanceValue)
+      ? `${cableResistanceValue.toFixed(4)} Ω`
+      : 'N/A'
+
+    const lastSurfaceVoltage = Number(surfaceDesignResult?.calculos_demanda_pozo?.v_superficie_req_v)
+    const lastTap = Number(surfaceDesignResult?.transformador_calculado?.tap_porcentaje_calculado)
+    const lastKva = Number(surfaceDesignResult?.vsd_calculado?.kva_vsd_req)
+    const lastMode = surfaceDesignResult?.calculos_suministro_superficie?.tipo_accionamiento
+
+    const formattedSurfaceVoltage = Number.isFinite(lastSurfaceVoltage)
+      ? `${lastSurfaceVoltage.toFixed(0)} V`
+      : 'N/A'
+    const formattedTap = Number.isFinite(lastTap)
+      ? `${lastTap.toFixed(1)} %`
+      : 'N/A'
+    const formattedKva = Number.isFinite(lastKva)
+      ? `${lastKva.toFixed(1)} kVA`
+      : 'N/A'
+
+    return (
+      <div className="panel-card">
+        <div className="panel-heading-row">
+          <h3 className="panel-heading">Surface Design Inputs</h3>
+          <button
+            className="panel-action-button"
+            onClick={handleCalculateSurfaceDesign}
+            disabled={surfaceDesignLoading}
+          >
+            {surfaceDesignLoading ? 'Calculating...' : 'Calculate Design'}
+          </button>
+        </div>
+
+        <div className="panel-grid">
+          <label className="panel-field">
+            <span>Surface Equipment Type</span>
+            <select
+              value={surfaceDesignMode}
+              onChange={(event) => {
+                const nextValue = event.target.value === 'tablero' ? 'tablero' : 'vsd'
+                setSurfaceDesignMode(nextValue)
+              }}
+            >
+              <option value="vsd">Variable Speed Drive (VSD)</option>
+              <option value="tablero">Switchboard / Fixed Speed</option>
+            </select>
+          </label>
+          <div className="panel-field">
+            <span>Cable Resistance (latest)</span>
+            <strong>{cableResistanceDisplay}</strong>
+          </div>
+        </div>
+
+        {surfaceDesignMode === 'vsd' && (
+          <div className="panel-grid" style={{ marginTop: 12 }}>
+            <label className="panel-field">
+              <span>Max Operating Frequency (Hz)</span>
+              <input
+                type="number"
+                min={1}
+                step={0.5}
+                value={surfaceDesignFreqMax}
+                onChange={(event) => {
+                  const numeric = Number(event.target.value)
+                  setSurfaceDesignFreqMax(Number.isFinite(numeric) ? numeric : DEFAULT_SURFACE_FREQ_MAX)
+                }}
+              />
+            </label>
+            <label className="panel-field">
+              <span>Configured VSD Output (V)</span>
+              <input
+                type="number"
+                min={1}
+                step={5}
+                value={surfaceDesignVoltage}
+                onChange={(event) => {
+                  const numeric = Number(event.target.value)
+                  setSurfaceDesignVoltage(Number.isFinite(numeric) ? numeric : DEFAULT_SURFACE_VOLTAGE)
+                }}
+              />
+            </label>
+            <label className="panel-field">
+              <span>VSD Efficiency</span>
+              <input
+                type="number"
+                min={0.5}
+                max={1}
+                step={0.01}
+                value={surfaceVsdEfficiency}
+                onChange={(event) => {
+                  const numeric = Number(event.target.value)
+                  setSurfaceVsdEfficiency(Number.isFinite(numeric) ? numeric : DEFAULT_VSD_EFFICIENCY)
+                }}
+              />
+            </label>
+            <label className="panel-field">
+              <span>VSD Input Power Factor</span>
+              <input
+                type="number"
+                min={0.5}
+                max={1}
+                step={0.01}
+                value={surfaceVsdPowerFactor}
+                onChange={(event) => {
+                  const numeric = Number(event.target.value)
+                  setSurfaceVsdPowerFactor(Number.isFinite(numeric) ? numeric : DEFAULT_VSD_POWER_FACTOR)
+                }}
+              />
+            </label>
+            <label className="panel-field">
+              <span>Filter Resistance (Ω)</span>
+              <input
+                type="number"
+                min={0.0001}
+                step={0.0001}
+                value={surfaceFilterResistance}
+                onChange={(event) => {
+                  const numeric = Number(event.target.value)
+                  setSurfaceFilterResistance(Number.isFinite(numeric) ? numeric : DEFAULT_FILTER_RESISTANCE)
+                }}
+              />
+            </label>
+            <label className="panel-field">
+              <span>Filter Inductance (H)</span>
+              <input
+                type="number"
+                min={0.000001}
+                step={0.000001}
+                value={surfaceFilterInductance}
+                onChange={(event) => {
+                  const numeric = Number(event.target.value)
+                  setSurfaceFilterInductance(Number.isFinite(numeric) ? numeric : DEFAULT_FILTER_INDUCTANCE)
+                }}
+              />
+            </label>
+          </div>
+        )}
+
+        {surfaceDesignMode === 'tablero' && (
+          <div className="panel-grid" style={{ marginTop: 12 }}>
+            <label className="panel-field">
+              <span>Grid Frequency (Hz)</span>
+              <input
+                type="number"
+                min={1}
+                step={0.5}
+                value={surfaceGridFrequency}
+                onChange={(event) => {
+                  const numeric = Number(event.target.value)
+                  setSurfaceGridFrequency(Number.isFinite(numeric) ? numeric : DEFAULT_SURFACE_GRID_FREQ)
+                }}
+              />
+            </label>
+            <label className="panel-field">
+              <span>Voltage Margin (%)</span>
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={surfaceBoardMargin}
+                onChange={(event) => {
+                  const numeric = Number(event.target.value)
+                  setSurfaceBoardMargin(Number.isFinite(numeric) ? numeric : DEFAULT_SURFACE_BOARD_MARGIN)
+                }}
+              />
+            </label>
+          </div>
+        )}
+
+        <div style={{ fontSize: '0.95rem', color: '#9fb7ff', fontWeight: 600, marginTop: 12 }}>
+          Transformer Parameters
+        </div>
+        <div className="panel-grid">
+          <label className="panel-field">
+            <span>Primary Voltage (V)</span>
+            <input
+              type="number"
+              min={1}
+              step={10}
+              value={surfaceTransformerPrimary}
+              onChange={(event) => {
+                const numeric = Number(event.target.value)
+                setSurfaceTransformerPrimary(Number.isFinite(numeric) ? numeric : DEFAULT_TRAFO_PRIMARY_V)
+              }}
+            />
+          </label>
+          <label className="panel-field">
+            <span>Secondary Voltage (V)</span>
+            <input
+              type="number"
+              min={1}
+              step={10}
+              value={surfaceTransformerSecondary}
+              onChange={(event) => {
+                const numeric = Number(event.target.value)
+                setSurfaceTransformerSecondary(Number.isFinite(numeric) ? numeric : DEFAULT_TRAFO_SECONDARY_V)
+              }}
+            />
+          </label>
+          <label className="panel-field">
+            <span>Impedance (%)</span>
+            <input
+              type="number"
+              min={0.1}
+              step={0.1}
+              value={surfaceTransformerImpedance}
+              onChange={(event) => {
+                const numeric = Number(event.target.value)
+                setSurfaceTransformerImpedance(Number.isFinite(numeric) ? numeric : DEFAULT_TRAFO_IMPEDANCE)
+              }}
+            />
+          </label>
+        </div>
+
+        {!Number.isFinite(cableResistanceValue) && (
+          <div className="panel-hint" style={{ marginTop: 12 }}>
+            Run the electrical calculation to populate cable resistance before executing the surface design sizing.
+          </div>
+        )}
+
+        {surfaceDesignMode === 'vsd' && (
+          <div style={{ marginTop: 16 }}>
+            <button
+              type="button"
+              onClick={() => setCollapseSurfaceVhz((prev) => !prev)}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: '#101b30',
+                border: '1px solid #203154',
+                borderRadius: 8,
+                padding: '12px 14px',
+                color: '#dbe4ff',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              <span>V/Hz Curve</span>
+              <span
+                style={{
+                  transition: 'transform 0.2s ease',
+                  transform: collapseSurfaceVhz ? 'rotate(0deg)' : 'rotate(90deg)',
+                  display: 'inline-flex'
+                }}
+                aria-hidden="true"
+              >
+                ▶
+              </span>
+            </button>
+            {!collapseSurfaceVhz && (
+              <div
+                style={{
+                  marginTop: 12,
+                  paddingLeft: 16,
+                  borderLeft: '2px solid #203154',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12
+                }}
+              >
+                {hasSurfaceVhzChartData ? (
+                  <div style={{ overflowX: 'auto', borderRadius: 8, background: '#0f1729', padding: 12 }}>
+                    {renderSurfaceVhzChart(surfaceVhzActivePoints)}
+                  </div>
+                ) : (
+                  <div className="panel-hint" style={{ margin: 0 }}>
+                    No V/Hz points available. Run the surface design calculation to populate the curve.
+                  </div>
+                )}
+
+                {hasSurfaceVhzRows && (
+                  <div
+                    style={{
+                      background: '#121c30',
+                      padding: 12,
+                      borderRadius: 8,
+                      border: '1px solid #1f2b46'
+                    }}
+                  >
+                    <table
+                      style={{
+                        width: '100%',
+                        borderCollapse: 'collapse',
+                        color: '#dbe4ff'
+                      }}
+                    >
+                      <thead>
+                        <tr style={{ textAlign: 'left', fontSize: '0.85rem', color: '#9fb7ff' }}>
+                          <th style={{ padding: '6px 8px', width: '20%' }}>Point</th>
+                          <th style={{ padding: '6px 8px', width: '40%' }}>Frequency (Hz)</th>
+                          <th style={{ padding: '6px 8px', width: '40%' }}>Voltage (V)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {surfaceVhzActivePoints.map((point, index) => {
+                          const freqValue = Number.isFinite(point.f) ? point.f : ''
+                          const voltValue = Number.isFinite(point.v) ? point.v : ''
+                          return (
+                            <tr key={`surface-config-vhz-row-${index}`} style={{ borderTop: '1px solid #1f2b46' }}>
+                              <td style={{ padding: '6px 8px' }}>Point {index + 1}</td>
+                              <td style={{ padding: '6px 8px' }}>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  value={freqValue}
+                                  onChange={(event) => handleSurfaceVhzPointChange(index, 'f', event.target.value)}
+                                  style={{
+                                    width: '100%',
+                                    background: '#0b1220',
+                                    border: '1px solid #273450',
+                                    borderRadius: 4,
+                                    color: '#dbe4ff',
+                                    padding: '6px 8px'
+                                  }}
+                                />
+                              </td>
+                              <td style={{ padding: '6px 8px' }}>
+                                <input
+                                  type="number"
+                                  step="1"
+                                  value={voltValue}
+                                  onChange={(event) => handleSurfaceVhzPointChange(index, 'v', event.target.value)}
+                                  style={{
+                                    width: '100%',
+                                    background: '#0b1220',
+                                    border: '1px solid #273450',
+                                    borderRadius: 4,
+                                    color: '#dbe4ff',
+                                    padding: '6px 8px'
+                                  }}
+                                />
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginTop: 12,
+                        gap: 12,
+                        flexWrap: 'wrap'
+                      }}
+                    >
+                      <small style={{ color: '#9fb7ff' }}>
+                        Adjust the targets to reflect the VSD programming. Edits stay local until you rerun the design.
+                      </small>
+                      <button
+                        type="button"
+                        className="panel-action-button"
+                        onClick={resetSurfaceVhzPoints}
+                        disabled={!surfaceVhzDefaultPoints.length}
+                      >
+                        Reset Points
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {surfaceDesignError && (
+          <div className="error" style={{ marginTop: 12 }}>
+            {surfaceDesignError}
+          </div>
+        )}
+
+        {surfaceDesignResult && (
+          <>
+            <div style={{ fontSize: '0.95rem', color: '#9fb7ff', fontWeight: 600, marginTop: 12 }}>
+              Last Surface Design
+            </div>
+            <div className="panel-grid">
+              <div className="panel-field">
+                <span>Design Mode</span>
+                <strong>{lastMode ? String(lastMode).toUpperCase() : 'N/A'}</strong>
+              </div>
+              <div className="panel-field">
+                <span>Required Surface Voltage</span>
+                <strong>{formattedSurfaceVoltage}</strong>
+              </div>
+              <div className="panel-field">
+                <span>Tap Recommendation</span>
+                <strong>{formattedTap}</strong>
+              </div>
+              <div className="panel-field">
+                <span>Estimated VSD Size</span>
+                <strong>{formattedKva}</strong>
+              </div>
+            </div>
+          </>
         )}
       </div>
     )
@@ -3644,6 +4517,7 @@ export default function App() {
     const scenarioMetrics: MetricDef[] = [
       { path: 'P_motor_kW', label: 'Motor Power (kW)', suffix: ' kW', digits: 2 },
       { path: 'I_motor', label: 'Motor Current (A)', suffix: ' A', digits: 2 },
+      { path: 'V_superficie', label: 'Surface Voltage (V)', suffix: ' V', digits: 0 },
       { path: 'Motor_Load_Percent', label: 'Motor Load (%)', suffix: ' %', digits: 1 },
       { path: 'P_perdida_kW', label: 'Cable Losses (kW)', suffix: ' kW', digits: 3 },
       { path: 'P_superficie_kW', label: 'Surface Power (kW)', suffix: ' kW', digits: 2 },
@@ -3659,6 +4533,40 @@ export default function App() {
       { path: 'metadata.operating_point.fluid_level_m', label: 'Fluid Level (m)', suffix: ' m', digits: 1 },
       { path: 'metadata.operating_point.sumergencia_m', label: 'Submergence (m)', suffix: ' m', digits: 1 }
     ]
+
+    const surfaceDesignData = surfaceDesignResult
+    const surfaceDemandMetrics: MetricDef[] = [
+      { path: 'calculos_demanda_pozo.v_motor_op_v', label: 'Motor Voltage (calc)', suffix: ' V', digits: 0 },
+      { path: 'calculos_demanda_pozo.v_drop_cable_v', label: 'Cable Voltage Drop', suffix: ' V', digits: 1 },
+      { path: 'calculos_demanda_pozo.v_superficie_req_v', label: 'Required Surface Voltage', suffix: ' V', digits: 0 },
+      { path: 'calculos_demanda_pozo.p_motor_kw', label: 'Motor Power (kW)', suffix: ' kW', digits: 2 },
+      { path: 'calculos_demanda_pozo.p_cable_loss_kw', label: 'Cable Losses (kW)', suffix: ' kW', digits: 3 },
+      { path: 'calculos_demanda_pozo.p_superficie_kw', label: 'Surface Active Power', suffix: ' kW', digits: 2 },
+      { path: 'calculos_demanda_pozo.i_motor_op_a', label: 'Motor Current', suffix: ' A', digits: 2 }
+    ]
+
+    const surfaceSupplyMetrics: MetricDef[] = [
+      { path: 'calculos_suministro_superficie.tipo_accionamiento', label: 'Equipment Type', allowString: true },
+      { path: 'calculos_suministro_superficie.frecuencia_calculo_hz', label: 'Design Frequency', suffix: ' Hz', digits: 1 },
+      { path: 'calculos_suministro_superficie.v_vsd_out_actual_v', label: 'Configured VSD Output', suffix: ' V', digits: 0 },
+      { path: 'calculos_suministro_superficie.v_drop_filtro_v', label: 'Filter Voltage Drop', suffix: ' V', digits: 1 },
+      { path: 'calculos_suministro_superficie.v_trafo_in_real_v', label: 'Transformer Input Voltage', suffix: ' V', digits: 0 },
+      { path: 'calculos_suministro_superficie.i_vsd_out_aprox_a', label: 'Transformer Current', suffix: ' A', digits: 2 }
+    ]
+
+    const surfaceTransformerMetrics: MetricDef[] = [
+      { path: 'transformador_calculado.v_sec_equivalente_calc_v', label: 'Equivalent Secondary Voltage', suffix: ' V', digits: 0 },
+      { path: 'transformador_calculado.tap_porcentaje_calculado', label: 'Tap Recommendation', suffix: ' %', digits: 2 },
+      { path: 'transformador_calculado.ratio_trafo_final', label: 'Transformer Ratio', digits: 4 }
+    ]
+
+    const surfaceVsdMetrics: MetricDef[] = [
+      { path: 'vsd_calculado.kva_vsd_req', label: 'Required VSD Size', suffix: ' kVA', digits: 1 },
+      { path: 'vsd_calculado.p_vsd_out_kw', label: 'VSD Output Power', suffix: ' kW', digits: 2 }
+    ]
+
+    const surfaceIsVsd = String(surfaceDesignData?.calculos_suministro_superficie?.tipo_accionamiento || '').toLowerCase() === 'vsd'
+    const surfaceWarnings = Array.isArray(surfaceDesignData?.warnings) ? surfaceDesignData.warnings : []
 
     const baseData = electricalData || {}
     const baseWarnings = Array.isArray(baseData?.warnings) ? baseData.warnings : []
@@ -3697,86 +4605,174 @@ export default function App() {
         <div className="panel-card">
           <div className="panel-heading-row">
             <h3 className="panel-heading">Base Electrical Summary</h3>
+            <button
+              className="panel-action-button"
+              type="button"
+              onClick={() => setCollapseBaseElectrical((prev) => !prev)}
+            >
+              {collapseBaseElectrical ? 'Expand' : 'Collapse'}
+            </button>
           </div>
-          <div className="panel-grid">
-            {baseSummaryMetrics.map((metric) => (
-              <div key={metric.path} className="panel-field">
-                <span>{metric.label}</span>
-                <strong>{formatValue(metric, baseData)}</strong>
-              </div>
-            ))}
-          </div>
-          <div style={{ fontSize: '0.95rem', color: '#9fb7ff', fontWeight: 600 }}>Operating Point</div>
-          <div className="panel-grid">
-            {operatingPointMetrics.map((metric) => (
-              <div key={metric.path} className="panel-field">
-                <span>{metric.label}</span>
-                <strong>{formatValue(metric, baseData)}</strong>
-              </div>
-            ))}
-          </div>
-          <div style={{ fontSize: '0.95rem', color: '#9fb7ff', fontWeight: 600 }}>Motor &amp; Cable Context</div>
-          <div className="panel-grid">
-            {metadataMetrics.map((metric) => (
-              <div key={metric.path} className="panel-field">
-                <span>{metric.label}</span>
-                <strong>{formatValue(metric, baseData)}</strong>
-              </div>
-            ))}
-          </div>
-          {baseWarnings.length > 0 && (
-            <div className="error" style={{ marginTop: 4 }}>
-              <strong>Warnings:</strong>
-              <ul>
-                {baseWarnings.map((message: string, index: number) => (
-                  <li key={`electrical-warning-${index}`}>{message}</li>
+          {!collapseBaseElectrical && (
+            <>
+              <div className="panel-grid">
+                {baseSummaryMetrics.map((metric) => (
+                  <div key={metric.path} className="panel-field">
+                    <span>{metric.label}</span>
+                    <strong>{formatValue(metric, baseData)}</strong>
+                  </div>
                 ))}
-              </ul>
-            </div>
+              </div>
+              <div style={{ fontSize: '0.95rem', color: '#9fb7ff', fontWeight: 600 }}>Operating Point</div>
+              <div className="panel-grid">
+                {operatingPointMetrics.map((metric) => (
+                  <div key={metric.path} className="panel-field">
+                    <span>{metric.label}</span>
+                    <strong>{formatValue(metric, baseData)}</strong>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: '0.95rem', color: '#9fb7ff', fontWeight: 600 }}>Motor &amp; Cable Context</div>
+              <div className="panel-grid">
+                {metadataMetrics.map((metric) => (
+                  <div key={metric.path} className="panel-field">
+                    <span>{metric.label}</span>
+                    <strong>{formatValue(metric, baseData)}</strong>
+                  </div>
+                ))}
+              </div>
+              {baseWarnings.length > 0 && (
+                <div className="error" style={{ marginTop: 4 }}>
+                  <strong>Warnings:</strong>
+                  <ul>
+                    {baseWarnings.map((message: string, index: number) => (
+                      <li key={`electrical-warning-${index}`}>{message}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
           )}
         </div>
+        {surfaceDesignData && (
+          <div className="panel-card">
+            <div className="panel-heading-row">
+              <h3 className="panel-heading">Surface Design (Static)</h3>
+              <button
+                className="panel-action-button"
+                type="button"
+                onClick={() => setCollapseSurfaceDesign((prev) => !prev)}
+              >
+                {collapseSurfaceDesign ? 'Expand' : 'Collapse'}
+              </button>
+            </div>
+            {!collapseSurfaceDesign && (
+              <>
+                <div style={{ fontSize: '0.95rem', color: '#9fb7ff', fontWeight: 600 }}>Well Demand Summary</div>
+                <div className="panel-grid">
+                  {surfaceDemandMetrics.map((metric) => (
+                    <div key={metric.path} className="panel-field">
+                      <span>{metric.label}</span>
+                      <strong>{formatValue(metric, surfaceDesignData)}</strong>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: '0.95rem', color: '#9fb7ff', fontWeight: 600, marginTop: 12 }}>Surface Supply</div>
+                <div className="panel-grid">
+                  {surfaceSupplyMetrics.map((metric) => (
+                    <div key={metric.path} className="panel-field">
+                      <span>{metric.label}</span>
+                      <strong>{formatValue(metric, surfaceDesignData)}</strong>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: '0.95rem', color: '#9fb7ff', fontWeight: 600, marginTop: 12 }}>Transformer Sizing</div>
+                <div className="panel-grid">
+                  {surfaceTransformerMetrics.map((metric) => (
+                    <div key={metric.path} className="panel-field">
+                      <span>{metric.label}</span>
+                      <strong>{formatValue(metric, surfaceDesignData)}</strong>
+                    </div>
+                  ))}
+                </div>
+                {surfaceIsVsd && (
+                  <>
+                    <div style={{ fontSize: '0.95rem', color: '#9fb7ff', fontWeight: 600, marginTop: 12 }}>VSD Requirements</div>
+                    <div className="panel-grid">
+                      {surfaceVsdMetrics.map((metric) => (
+                        <div key={metric.path} className="panel-field">
+                          <span>{metric.label}</span>
+                          <strong>{formatValue(metric, surfaceDesignData)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {surfaceWarnings.length > 0 && (
+                  <div className="error" style={{ marginTop: 8 }}>
+                    <strong>Warnings:</strong>
+                    <ul>
+                      {surfaceWarnings.map((warning: string, index: number) => (
+                        <li key={`surface-warning-${index}`}>{warning}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
         {hasScenarioData && (
           <div className="panel-card sensitivity-table-card">
             <div className="panel-heading-row">
               <h3 className="panel-heading">Scenario Electrical Comparison</h3>
+              <button
+                className="panel-action-button"
+                type="button"
+                onClick={() => setCollapseScenarioElectrical((prev) => !prev)}
+              >
+                {collapseScenarioElectrical ? 'Expand' : 'Collapse'}
+              </button>
             </div>
-            <div className="table-wrapper">
-              <table className="sensitivity-table sensitivity-table--scenario-grid">
-                <thead>
-                  <tr>
-                    <th>Metric</th>
-                    <th style={{ color: '#dbe4ff' }}>Base</th>
-                    {scenarioKeysForTable.map((key) => (
-                      <th
-                        key={`electrical-scenario-header-${key}`}
-                        style={{ color: scenarioStyles?.[key]?.color || '#9fb7ff' }}
-                      >
-                        {getScenarioHeaderLabel(key)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {scenarioMetrics.map((metric) => (
-                    <tr key={metric.path}>
-                      <td className="metric-label">{metric.label}</td>
-                      <td className="scenario-value" style={{ color: '#dbe4ff' }}>
-                        {formatValue(metric, baseData)}
-                      </td>
+            {!collapseScenarioElectrical && (
+              <div className="table-wrapper">
+                <table className="sensitivity-table sensitivity-table--scenario-grid">
+                  <thead>
+                    <tr>
+                      <th>Metric</th>
+                      <th style={{ color: '#dbe4ff' }}>Base</th>
                       {scenarioKeysForTable.map((key) => (
-                        <td
-                          key={`${metric.path}-${key}`}
-                          className="scenario-value"
-                          style={{ color: scenarioStyles?.[key]?.color || '#dbe4ff' }}
+                        <th
+                          key={`electrical-scenario-header-${key}`}
+                          style={{ color: scenarioStyles?.[key]?.color || '#9fb7ff' }}
                         >
-                          {formatValue(metric, scenarioElectricalData?.[key])}
-                        </td>
+                          {getScenarioHeaderLabel(key)}
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {scenarioMetrics.map((metric) => (
+                      <tr key={metric.path}>
+                        <td className="metric-label">{metric.label}</td>
+                        <td className="scenario-value" style={{ color: '#dbe4ff' }}>
+                          {formatValue(metric, baseData)}
+                        </td>
+                        {scenarioKeysForTable.map((key) => (
+                          <td
+                            key={`${metric.path}-${key}`}
+                            className="scenario-value"
+                            style={{ color: scenarioStyles?.[key]?.color || '#dbe4ff' }}
+                          >
+                            {formatValue(metric, scenarioElectricalData?.[key])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
         {!hasScenarioData && sensitivityEnabled && (
@@ -3881,6 +4877,24 @@ export default function App() {
           <div className="config-tabs">
             <div className="config-tabs-header">
               <button
+                className={`config-tab-button ${configTab === 'ipr' ? 'active' : ''}`}
+                onClick={() => setConfigTab('ipr')}
+              >
+                IPR Configuration
+              </button>
+              <button
+                className={`config-tab-button ${configTab === 'installation' ? 'active' : ''}`}
+                onClick={() => setConfigTab('installation')}
+              >
+                Installation Parameters
+              </button>
+              <button
+                className={`config-tab-button ${configTab === 'pump' ? 'active' : ''}`}
+                onClick={() => setConfigTab('pump')}
+              >
+                Pump Configuration
+              </button>
+              <button
                 className={`config-tab-button ${configTab === 'motor' ? 'active' : ''}`}
                 onClick={() => setConfigTab('motor')}
               >
@@ -3893,27 +4907,16 @@ export default function App() {
                 Cable Configuration
               </button>
               <button
-                className={`config-tab-button ${configTab === 'pump' ? 'active' : ''}`}
-                onClick={() => setConfigTab('pump')}
+                className={`config-tab-button ${configTab === 'surface' ? 'active' : ''}`}
+                onClick={() => setConfigTab('surface')}
               >
-                Pump Configuration
-              </button>
-              <button
-                className={`config-tab-button ${configTab === 'installation' ? 'active' : ''}`}
-                onClick={() => setConfigTab('installation')}
-              >
-                Installation Parameters
-              </button>
-              <button
-                className={`config-tab-button ${configTab === 'ipr' ? 'active' : ''}`}
-                onClick={() => setConfigTab('ipr')}
-              >
-                IPR Configuration
+                Surface Design
               </button>
             </div>
             <div className="config-tab-body">
               {configTab === 'motor' && renderMotorConfiguration()}
               {configTab === 'cable' && renderCableConfiguration()}
+              {configTab === 'surface' && renderSurfaceDesignConfiguration()}
               {configTab === 'pump' && renderPumpConfiguration()}
               {configTab === 'installation' && renderInstallationConfiguration()}
               {configTab === 'ipr' && renderIprConfiguration()}

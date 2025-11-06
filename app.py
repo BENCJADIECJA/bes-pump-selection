@@ -18,6 +18,7 @@ import tubing_catalog
 import pump_coefficients
 from pump_coefficients import PumpCoefficientError, PumpCoefficientValidationError
 import electrical_calculations
+import surface_design
 
 app = Flask(__name__)
 # Configuramos CORS para permitir peticiones desde nuestro front-end
@@ -239,6 +240,19 @@ def calculate_conditions():
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/surface-design', methods=['POST'])
+def calculate_surface_design():
+    """Calcula el diseño estático de equipos de superficie (TAP / VSD)."""
+    try:
+        payload = request.json or {}
+        result = surface_design.calcular_diseno_superficie(payload)
+        return jsonify({"success": True, "result": result}), 200
+    except surface_design.SurfaceDesignError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 @app.route('/api/validate_design', methods=['POST'])
 def validate_design():
