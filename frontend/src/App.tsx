@@ -19,13 +19,13 @@ const DEFAULT_SCENARIO_STYLES = {
 const FALLBACK_SCENARIO_STYLE = { label: 'System Demand', color: '#c0392b', dash: 'dot', symbol: 'star' }
 
 // Default equipment selections and surface design parameters used to seed the UI before catalogs load
-const DEFAULT_MOTOR_ID: string | null = null
-const DEFAULT_MLE_CABLE_ID: string | null = null
-const DEFAULT_DOWNHOLE_CABLE_ID: string | null = null
-const DEFAULT_SURFACE_CABLE_ID: string | null = null
+const DEFAULT_MOTOR_ID: string | null = 'N406AM130 2400V SGL'
+const DEFAULT_MLE_CABLE_ID: string | null = 'awg_6'
+const DEFAULT_DOWNHOLE_CABLE_ID: string | null = 'awg_4'
+const DEFAULT_SURFACE_CABLE_ID: string | null = 'awg_4'
 
-const DEFAULT_MLE_LENGTH_METERS = 400
-const DEFAULT_SURFACE_LENGTH_METERS = 60
+const DEFAULT_MLE_LENGTH_METERS = 20
+const DEFAULT_SURFACE_LENGTH_METERS = 70
 
 const DEFAULT_SURFACE_DESIGN_MODE: 'vsd' | 'tablero' = 'vsd'
 const DEFAULT_SURFACE_FREQ_MAX = 60
