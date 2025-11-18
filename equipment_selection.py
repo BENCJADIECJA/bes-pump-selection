@@ -5,10 +5,12 @@
 import json
 import logging
 import os
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np  # Importamos numpy para manejo de tipos
 import pandas as pd
+
+from db.utils import DatabaseConfigError, get_connection
 
 # Conversión de unidades para potencia de la bomba
 KW_TO_HP = 1.34102209
@@ -24,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 # --- NOMBRES DE ARCHIVO Y HOJAS ---
 EXCEL_FILE_NAME = 'coeficientes NOVOMET.xlsx'
+CATALOG_EXCEL_PATH = os.getenv('CATALOG_EXCEL_PATH', EXCEL_FILE_NAME)
+
+CATALOG_SOURCE_DEFAULT = os.getenv('CATALOG_SOURCE', 'db').lower()
 # Podemos intentar varias alternativas (el archivo real usa 'BOMBA' y 'MOTOR')
 PUMP_SHEET_CANDIDATES = ['Bombas', 'BOMBA', 'Bomba', 'Bombas ']
 MOTOR_SHEET_CANDIDATES = ['Motor', 'MOTOR', 'Motor ', 'MOTOR']
@@ -75,6 +80,18 @@ PUMP_BHP_PREFIXES = ['npoly', 'C-P-']
 # Coeficientes para Eficiencia (si existen)
 PUMP_EFF_CANDIDATES = ['C-E-A', 'C-E-B', 'C-E-C', 'eff_a', 'eff_b', 'eff_c']
 
+
+def sort_poly_cols(columns, prefix_candidates):
+    """Ordena columnas de polinomios usando el número al final del nombre."""
+    import re
+
+    def keyfn(column_name: str) -> int:
+        match = re.search(r"(\d+)$", column_name)
+        if match:
+            return int(match.group(1))
+        return 0
+
+    return sorted(columns, key=keyfn)
 # --- ATENCIÓN: VERIFICAR ESTOS NOMBRES ---
 # Lista de 11 coeficientes para Altura (Head) (Polinomio Grado 10)
 # H = C0 + C1*Q + C2*Q^2 + ... + C10*Q^10
@@ -115,6 +132,295 @@ PUMP_SHEET_NAME = None
 MOTOR_SHEET_NAME = None
 
 MOTOR_COLUMN_MAP: Dict[str, str] = {}
+COLUMN_MAPPING_CACHE: Optional[Dict[str, Any]] = None
+
+
+def _resolve_catalog_source(source: Optional[str]) -> str:
+    candidate = (source or CATALOG_SOURCE_DEFAULT or 'db').lower()
+    return candidate
+
+
+def _resolve_excel_path(path: Optional[str]) -> str:
+    if path and path.strip():
+        return path
+    env_candidate = os.getenv('CATALOG_EXCEL_PATH')
+    if env_candidate:
+        return env_candidate
+    return CATALOG_EXCEL_PATH
+
+
+def _set_catalog_excel_path(path: str) -> None:
+    global CATALOG_EXCEL_PATH
+    CATALOG_EXCEL_PATH = path
+
+
+def _persist_column_mapping(mapping: Dict[str, Any]) -> None:
+    try:
+        os.makedirs('data', exist_ok=True)
+        with open(os.path.join('data', 'column_mapping.json'), 'w', encoding='utf-8') as fh:
+            json.dump(mapping, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        logger.debug('No se pudo escribir column_mapping.json, se continuará sin el archivo.', exc_info=True)
+
+
+def _set_column_mapping(mapping: Dict[str, Any]) -> None:
+    global PUMP_SHEET_NAME, MOTOR_SHEET_NAME
+    global COL_PUMP_ID, COL_PUMP_MIN_Q, COL_PUMP_MAX_Q
+    global COLS_PUMP_HEAD, COLS_PUMP_BHP, COLS_PUMP_EFF
+    global COL_MOTOR_ID, COL_MOTOR_HP, COL_MOTOR_AMPS, COL_MOTOR_VOLTAGE
+    global COLUMN_MAPPING_CACHE
+
+    if not mapping:
+        return
+
+    PUMP_SHEET_NAME = mapping.get('pump_sheet', PUMP_SHEET_NAME)
+    MOTOR_SHEET_NAME = mapping.get('motor_sheet', MOTOR_SHEET_NAME)
+
+    COL_PUMP_ID = mapping.get('pump_id_col', COL_PUMP_ID)
+    COL_PUMP_MIN_Q = mapping.get('pump_min_q_col', COL_PUMP_MIN_Q)
+    COL_PUMP_MAX_Q = mapping.get('pump_max_q_col', COL_PUMP_MAX_Q)
+
+    pump_head_cols = mapping.get('pump_head_coeffs')
+    if isinstance(pump_head_cols, (list, tuple)) and pump_head_cols:
+        COLS_PUMP_HEAD[:] = list(pump_head_cols)
+
+    pump_bhp_cols = mapping.get('pump_bhp_coeffs')
+    if isinstance(pump_bhp_cols, (list, tuple)) and pump_bhp_cols:
+        COLS_PUMP_BHP[:] = list(pump_bhp_cols)
+
+    pump_eff_cols = mapping.get('pump_eff_coeffs')
+    if isinstance(pump_eff_cols, (list, tuple)) and pump_eff_cols:
+        COLS_PUMP_EFF[:] = list(pump_eff_cols)
+
+    motor_id_col = mapping.get('motor_id_col', COL_MOTOR_ID)
+    motor_hp_col = mapping.get('motor_hp_col', COL_MOTOR_HP)
+    motor_amps_col = mapping.get('motor_amps_col', COL_MOTOR_AMPS)
+    motor_voltage_col = mapping.get('motor_voltage_col', COL_MOTOR_VOLTAGE)
+
+    COL_MOTOR_ID = motor_id_col
+    COL_MOTOR_HP = motor_hp_col
+    COL_MOTOR_AMPS = motor_amps_col
+    COL_MOTOR_VOLTAGE = motor_voltage_col
+
+    motor_map = mapping.get('motor_column_map')
+    if isinstance(motor_map, dict):
+        MOTOR_COLUMN_MAP.clear()
+        MOTOR_COLUMN_MAP.update(motor_map)
+
+    COLUMN_MAPPING_CACHE = dict(mapping)
+
+
+def _build_column_mapping() -> Dict[str, Any]:
+    mapping = {
+        'pump_sheet': PUMP_SHEET_NAME,
+        'motor_sheet': MOTOR_SHEET_NAME,
+        'pump_id_col': COL_PUMP_ID,
+        'pump_min_q_col': COL_PUMP_MIN_Q,
+        'pump_max_q_col': COL_PUMP_MAX_Q,
+        'pump_head_coeffs': list(COLS_PUMP_HEAD),
+        'pump_bhp_coeffs': list(COLS_PUMP_BHP),
+        'pump_eff_coeffs': list(COLS_PUMP_EFF),
+        'motor_id_col': COL_MOTOR_ID,
+        'motor_hp_col': COL_MOTOR_HP,
+        'motor_amps_col': COL_MOTOR_AMPS,
+        'motor_voltage_col': COL_MOTOR_VOLTAGE,
+    }
+    if MOTOR_COLUMN_MAP:
+        mapping['motor_column_map'] = dict(MOTOR_COLUMN_MAP)
+    return mapping
+
+
+def _detect_column_configuration() -> Dict[str, Any]:
+    global COL_PUMP_ID, COL_PUMP_MIN_Q, COL_PUMP_MAX_Q
+    global COL_MOTOR_ID, COL_MOTOR_HP, COL_MOTOR_AMPS, COL_MOTOR_VOLTAGE
+    global COLS_PUMP_HEAD, COLS_PUMP_BHP, COLS_PUMP_EFF
+
+    if PUMP_CATALOG is None or MOTOR_CATALOG is None:
+        raise RuntimeError('Catálogos no cargados para detectar columnas.')
+
+    column_map = _build_required_column_map(MOTOR_CATALOG, REQUIRED_MOTOR_COLUMNS)
+    MOTOR_COLUMN_MAP.clear()
+    MOTOR_COLUMN_MAP.update({
+        'descripcion': column_map['descripción'],
+        'hp_nom': column_map['HP NOM'],
+        'volt_nom': column_map['VOLT NOM'],
+        'amp_nom': column_map['AMP NOM'],
+        'cos_fi_nom': column_map['COS FI NOM'],
+        'eff': column_map['EFF'],
+        'hz_nom': column_map['HZ NOM'],
+        'tipo_motor': column_map['Tipo Motor']
+    })
+
+    def mark_row_completeness(row):
+        motor_id_value = row.get(column_map['descripción'])
+        for header in MOTOR_COMPLETENESS_COLUMNS:
+            col = column_map[header]
+            if _is_missing(row.get(col)):
+                logger.warning(
+                    "Motor '%s' con datos incompletos: falta valor en columna '%s'",
+                    motor_id_value,
+                    header
+                )
+                return False
+        return True
+
+    MOTOR_CATALOG['__is_complete'] = MOTOR_CATALOG.apply(mark_row_completeness, axis=1)
+
+    # Detectar columnas de bomba y motor
+    COL_PUMP_ID = pick_column(PUMP_CATALOG.columns, PUMP_ID_CANDIDATES, default=PUMP_CATALOG.columns[0])
+    COL_PUMP_MIN_Q = pick_column(PUMP_CATALOG.columns, PUMP_MIN_Q_CANDIDATES, default=COL_PUMP_MIN_Q)
+    COL_PUMP_MAX_Q = pick_column(PUMP_CATALOG.columns, PUMP_MAX_Q_CANDIDATES, default=COL_PUMP_MAX_Q)
+
+    COL_MOTOR_ID = pick_column(MOTOR_CATALOG.columns, MOTOR_ID_CANDIDATES, default=MOTOR_CATALOG.columns[0])
+    COL_MOTOR_HP = pick_column(MOTOR_CATALOG.columns, MOTOR_HP_CANDIDATES, default=COL_MOTOR_HP)
+    COL_MOTOR_AMPS = pick_column(MOTOR_CATALOG.columns, MOTOR_AMPS_CANDIDATES, default=COL_MOTOR_AMPS)
+    COL_MOTOR_VOLTAGE = pick_column(MOTOR_CATALOG.columns, MOTOR_VOLTAGE_CANDIDATES, default=COL_MOTOR_VOLTAGE)
+
+    # Detectar coeficientes de polinomio para bombas
+    hcols = [c for c in PUMP_CATALOG.columns if any(c.lower().startswith(pref.lower()) for pref in PUMP_HEAD_PREFIXES)]
+    pcols = [c for c in PUMP_CATALOG.columns if any(c.lower().startswith(pref.lower()) for pref in PUMP_BHP_PREFIXES)]
+
+    if not hcols:
+        hcols = [c for c in PUMP_CATALOG.columns if 'hpoly' in c.lower() or (c.lower().startswith('h') and 'poly' in c.lower())]
+    if not pcols:
+        pcols = [c for c in PUMP_CATALOG.columns if 'npoly' in c.lower() or (c.lower().startswith('n') and 'poly' in c.lower())]
+
+    if hcols:
+        COLS_PUMP_HEAD[:] = sort_poly_cols(hcols, PUMP_HEAD_PREFIXES)
+    if pcols:
+        COLS_PUMP_BHP[:] = sort_poly_cols(pcols, PUMP_BHP_PREFIXES)
+
+    eff_cols = [c for c in PUMP_CATALOG.columns if any(ec.lower() in c.lower() for ec in PUMP_EFF_CANDIDATES)]
+    if eff_cols:
+        COLS_PUMP_EFF[:] = list(eff_cols[:3])
+
+    mapping = _build_column_mapping()
+    return mapping
+
+
+def _load_cable_catalog_from_file(path: Optional[str] = None) -> None:
+    global CABLE_CATALOG
+
+    catalog_path = path or CABLE_CATALOG_PATH
+    if not os.path.exists(catalog_path):
+        raise FileNotFoundError(
+            f"No se encontró el archivo de catálogo de cables en '{catalog_path}'"
+        )
+
+    with open(catalog_path, 'r', encoding='utf-8') as fh:
+        data = json.load(fh)
+
+    if not isinstance(data, list):
+        raise ValueError('El catálogo de cables debe ser un array JSON.')
+
+    CABLE_CATALOG = data
+
+
+def _load_cable_catalog_from_db() -> None:
+    global CABLE_CATALOG
+
+    connection = get_connection()
+    with connection:
+        rows = connection.execute(
+            "SELECT cable_id, data FROM cable_catalog ORDER BY cable_id"
+        ).fetchall()
+
+    if not rows:
+        raise RuntimeError('No hay cables almacenados en la base de datos.')
+
+    catalog: list[Dict[str, Any]] = []
+    for row in rows:
+        entry = row.get('data') or {}
+        if not isinstance(entry, dict):
+            continue
+        entry.setdefault('id', row.get('cable_id'))
+        catalog.append(entry)
+
+    if not catalog:
+        raise RuntimeError('No se pudieron construir entradas de cables desde la base de datos.')
+
+    CABLE_CATALOG = catalog
+
+
+def _load_catalogs_from_excel(excel_path: Optional[str]) -> None:
+    global PUMP_CATALOG, MOTOR_CATALOG, PUMP_SHEET_NAME, MOTOR_SHEET_NAME
+
+    path = _resolve_excel_path(excel_path)
+    _set_catalog_excel_path(path)
+
+    print(f"Intentando cargar '{path}'...")
+    try:
+        xls = pd.ExcelFile(path)
+    except FileNotFoundError as exc:
+        raise
+
+    pump_sheet = find_sheet_name(xls, PUMP_SHEET_CANDIDATES)
+    motor_sheet = find_sheet_name(xls, MOTOR_SHEET_CANDIDATES)
+    if pump_sheet is None or motor_sheet is None:
+        raise RuntimeError('No se pudieron detectar las hojas de bombas y motores en el Excel.')
+
+    PUMP_SHEET_NAME = pump_sheet
+    MOTOR_SHEET_NAME = motor_sheet
+
+    PUMP_CATALOG = pd.read_excel(path, sheet_name=pump_sheet)
+    MOTOR_CATALOG = pd.read_excel(path, sheet_name=motor_sheet)
+
+    PUMP_CATALOG = PUMP_CATALOG.replace({np.nan: None})
+    MOTOR_CATALOG = MOTOR_CATALOG.replace({np.nan: None})
+
+    mapping = _detect_column_configuration()
+    _set_column_mapping(mapping)
+    _persist_column_mapping(mapping)
+
+    print(f"Catálogos reales cargados exitosamente desde '{path}'.")
+    print(f"  - {len(PUMP_CATALOG)} bombas cargadas.")
+    print(f"  - {len(MOTOR_CATALOG)} motores cargados.")
+
+
+def _load_catalogs_from_db() -> None:
+    global PUMP_CATALOG, MOTOR_CATALOG
+
+    connection = get_connection()
+    with connection:
+        pump_rows = connection.execute(
+            "SELECT data FROM pump_catalog ORDER BY pump_id"
+        ).fetchall()
+        motor_rows = connection.execute(
+            "SELECT data FROM motor_catalog ORDER BY motor_id"
+        ).fetchall()
+        metadata_row = connection.execute(
+            "SELECT data FROM catalog_metadata WHERE key = %s",
+            ('catalog_context',),
+        ).fetchone()
+
+    if not pump_rows or not motor_rows:
+        raise RuntimeError('No hay catálogos de bombas/motores en la base de datos.')
+
+    PUMP_CATALOG = pd.DataFrame([row['data'] for row in pump_rows])
+    MOTOR_CATALOG = pd.DataFrame([row['data'] for row in motor_rows])
+
+    if PUMP_CATALOG.empty or MOTOR_CATALOG.empty:
+        raise RuntimeError('Las tablas de catálogos en la base de datos están vacías.')
+
+    PUMP_CATALOG = PUMP_CATALOG.replace({np.nan: None})
+    MOTOR_CATALOG = MOTOR_CATALOG.replace({np.nan: None})
+
+    mapping: Dict[str, Any] = {}
+    if metadata_row and isinstance(metadata_row.get('data'), dict):
+        context = metadata_row['data']
+        mapping = dict(context.get('column_mapping') or {})
+        motor_map = context.get('motor_column_map')
+        if isinstance(motor_map, dict):
+            mapping['motor_column_map'] = motor_map
+        excel_path = context.get('excel_path')
+        if isinstance(excel_path, str) and excel_path:
+            _set_catalog_excel_path(excel_path)
+
+    if mapping:
+        _set_column_mapping(mapping)
+    else:
+        mapping = _detect_column_configuration()
+        _set_column_mapping(mapping)
 
 # Variables de columna (valores por defecto para compatibilidad)
 COL_PUMP_ID = 'Tipo'
@@ -201,163 +507,66 @@ def calculate_polynomial(coeffs, q):
         total += c * (q ** i)
     return total
 
-def load_cable_catalog(force: bool = False):
-    """Carga el catálogo de cables desde disco."""
+def load_cable_catalog(force: bool = False, source: Optional[str] = None, file_path: Optional[str] = None):
+    """Carga el catálogo de cables desde la base de datos o desde un archivo JSON."""
     global CABLE_CATALOG
 
     if CABLE_CATALOG is not None and not force:
         return
 
-    if not os.path.exists(CABLE_CATALOG_PATH):
-        raise FileNotFoundError(
-            f"No se encontró el archivo de catálogo de cables en '{CABLE_CATALOG_PATH}'"
-        )
+    resolved_source = _resolve_catalog_source(source)
+    explicit = source is not None
 
-    with open(CABLE_CATALOG_PATH, 'r', encoding='utf-8') as fh:
-        data = json.load(fh)
-
-    if not isinstance(data, list):
-        raise ValueError('El catálogo de cables debe ser un array JSON.')
-
-    CABLE_CATALOG = data
-
-
-def load_catalogs():
-    """
-    Carga los catálogos de equipos (bombas, motores) desde un archivo Excel.
-    """
-    global PUMP_CATALOG, MOTOR_CATALOG, PUMP_SHEET_NAME, MOTOR_SHEET_NAME, MOTOR_COLUMN_MAP
-
-    try:
-        print(f"Intentando cargar '{EXCEL_FILE_NAME}'...")
-        xls = pd.ExcelFile(EXCEL_FILE_NAME)
-        pump_sheet = find_sheet_name(xls, PUMP_SHEET_CANDIDATES)
-        motor_sheet = find_sheet_name(xls, MOTOR_SHEET_CANDIDATES)
-        PUMP_SHEET_NAME = pump_sheet
-        MOTOR_SHEET_NAME = motor_sheet
-        print(f"  Hoja detectada para bombas: '{pump_sheet}'")
-        print(f"  Hoja detectada para motores: '{motor_sheet}'")
-
-        PUMP_CATALOG = pd.read_excel(EXCEL_FILE_NAME, sheet_name=pump_sheet)
-        MOTOR_CATALOG = pd.read_excel(EXCEL_FILE_NAME, sheet_name=motor_sheet)
-
-        # --- LIMPIEZA DE DATOS ---
-        PUMP_CATALOG = PUMP_CATALOG.replace({np.nan: None})
-        MOTOR_CATALOG = MOTOR_CATALOG.replace({np.nan: None})
-
-        # Validar columnas obligatorias de motor
-        column_map = _build_required_column_map(MOTOR_CATALOG, REQUIRED_MOTOR_COLUMNS)
-        MOTOR_COLUMN_MAP = {
-            'descripcion': column_map['descripción'],
-            'hp_nom': column_map['HP NOM'],
-            'volt_nom': column_map['VOLT NOM'],
-            'amp_nom': column_map['AMP NOM'],
-            'cos_fi_nom': column_map['COS FI NOM'],
-            'eff': column_map['EFF'],
-            'hz_nom': column_map['HZ NOM'],
-            'tipo_motor': column_map['Tipo Motor']
-        }
-
-        def mark_row_completeness(row):
-            motor_id_value = row.get(column_map['descripción'])
-            for header in MOTOR_COMPLETENESS_COLUMNS:
-                col = column_map[header]
-                if _is_missing(row.get(col)):
-                    logger.warning(
-                        "Motor '%s' con datos incompletos: falta valor en columna '%s'",
-                        motor_id_value,
-                        header
-                    )
-                    return False
-            return True
-
-        MOTOR_CATALOG['__is_complete'] = MOTOR_CATALOG.apply(mark_row_completeness, axis=1)
-
-        # --- MAPEO DINÁMICO DE COLUMNAS ---
-        global COL_PUMP_ID, COL_PUMP_MIN_Q, COL_PUMP_MAX_Q
-        global COL_MOTOR_ID, COL_MOTOR_HP, COL_MOTOR_AMPS, COL_MOTOR_VOLTAGE
-        global COLS_PUMP_HEAD, COLS_PUMP_BHP, COLS_PUMP_EFF
-
-        # Detectar columnas de id, min y max para bombas
-        COL_PUMP_ID = pick_column(PUMP_CATALOG.columns, PUMP_ID_CANDIDATES, default=PUMP_CATALOG.columns[0])
-        COL_PUMP_MIN_Q = pick_column(PUMP_CATALOG.columns, PUMP_MIN_Q_CANDIDATES, default=COL_PUMP_MIN_Q)
-        COL_PUMP_MAX_Q = pick_column(PUMP_CATALOG.columns, PUMP_MAX_Q_CANDIDATES, default=COL_PUMP_MAX_Q)
-
-        # Detectar columnas de motor
-        COL_MOTOR_ID = pick_column(MOTOR_CATALOG.columns, MOTOR_ID_CANDIDATES, default=MOTOR_CATALOG.columns[0])
-        COL_MOTOR_HP = pick_column(MOTOR_CATALOG.columns, MOTOR_HP_CANDIDATES, default=COL_MOTOR_HP)
-        COL_MOTOR_AMPS = pick_column(MOTOR_CATALOG.columns, MOTOR_AMPS_CANDIDATES, default=COL_MOTOR_AMPS)
-        COL_MOTOR_VOLTAGE = pick_column(MOTOR_CATALOG.columns, MOTOR_VOLTAGE_CANDIDATES, default=COL_MOTOR_VOLTAGE)
-
-        # Detectar coeficientes de polinomio para bombas (hpoly0..hpoly10, npoly0..npoly9)
-        hcols = [c for c in PUMP_CATALOG.columns if any(c.lower().startswith(pref) for pref in PUMP_HEAD_PREFIXES)]
-        pcols = [c for c in PUMP_CATALOG.columns if any(c.lower().startswith(pref) for pref in PUMP_BHP_PREFIXES)]
-
-        # Si no encontramos, intentar buscar 'hpoly'/'npoly' de forma más laxa
-        if not hcols:
-            hcols = [c for c in PUMP_CATALOG.columns if 'hpoly' in c.lower() or c.lower().startswith('h') and 'poly' in c.lower()]
-        if not pcols:
-            pcols = [c for c in PUMP_CATALOG.columns if 'npoly' in c.lower() or c.lower().startswith('n') and 'poly' in c.lower()]
-
-        # Ordenamos por el número final si es posible
-        def sort_poly_cols(cols, prefix_candidates):
-            def keyfn(col):
-                import re
-                m = re.search(r"(\d+)$", col)
-                if m:
-                    return int(m.group(1))
-                return 0
-            return sorted(cols, key=keyfn)
-
-        COLS_PUMP_HEAD = sort_poly_cols(hcols, PUMP_HEAD_PREFIXES) if hcols else COLS_PUMP_HEAD
-        COLS_PUMP_BHP = sort_poly_cols(pcols, PUMP_BHP_PREFIXES) if pcols else COLS_PUMP_BHP
-
-        # Intentar detectar coeficientes de eficiencia
-        eff_cols = [c for c in PUMP_CATALOG.columns if any(ec.lower() in c.lower() for ec in PUMP_EFF_CANDIDATES)]
-        if eff_cols:
-            # Tomar hasta 3 columnas encontradas
-            COLS_PUMP_EFF = eff_cols[:3]
-
-        print(f"Catálogos reales cargados exitosamente desde '{EXCEL_FILE_NAME}'.")
-        print(f"  - {len(PUMP_CATALOG)} bombas cargadas.")
-        print(f"  - {len(MOTOR_CATALOG)} motores cargados.")
-
-        # Guardar mapeo de columnas detectado para revisión
+    if resolved_source == 'db':
         try:
-            mapping = {
-                'pump_sheet': pump_sheet,
-                'motor_sheet': motor_sheet,
-                'pump_id_col': COL_PUMP_ID,
-                'pump_min_q_col': COL_PUMP_MIN_Q,
-                'pump_max_q_col': COL_PUMP_MAX_Q,
-                'pump_head_coeffs': COLS_PUMP_HEAD,
-                'pump_bhp_coeffs': COLS_PUMP_BHP,
-                'pump_eff_coeffs': COLS_PUMP_EFF,
-                'motor_id_col': COL_MOTOR_ID,
-                'motor_hp_col': COL_MOTOR_HP,
-                'motor_amps_col': COL_MOTOR_AMPS,
-                'motor_voltage_col': COL_MOTOR_VOLTAGE
-            }
-            os.makedirs('data', exist_ok=True)
-            with open(os.path.join('data', 'column_mapping.json'), 'w', encoding='utf-8') as fh:
-                json.dump(mapping, fh, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+            _load_cable_catalog_from_db()
+            return
+        except DatabaseConfigError as exc:
+            if explicit:
+                raise
+            logger.warning('Configuración PostgreSQL incompleta para cargar cables: %s', exc)
+            resolved_source = 'file'
+        except Exception as exc:
+            if explicit:
+                raise
+            logger.warning('No se pudo cargar el catálogo de cables desde PostgreSQL (%s). Se usará el archivo local.', exc)
+            resolved_source = 'file'
 
-    except FileNotFoundError:
-        print(f"ERROR: No se encontró el archivo '{EXCEL_FILE_NAME}'. Asegúrese de que esté en la carpeta del proyecto.")
-        raise
-    except Exception as e:
-        print(f"ERROR al leer '{EXCEL_FILE_NAME}': {e}")
-        print("Asegúrese de que la librería 'openpyxl' esté instalada y que las hojas/columnas sean correctas.")
-        raise
+    _load_cable_catalog_from_file(file_path)
 
-    # NOTE: Se ha removido la carga de catálogos dummy. El archivo Excel con coeficientes
-    # debe estar presente y correctamente formado. Si la lectura falla, se levantará
-    # una excepción para que el fallo sea evidente durante el desarrollo y despliegue.
 
-    # Cargar catálogo de cables en memoria para mantener consistencia al iniciar la app.
-    load_cable_catalog()
+def load_catalogs(force: bool = False, source: Optional[str] = None, excel_path: Optional[str] = None):
+    """Carga los catálogos de bombas y motores desde PostgreSQL o Excel."""
+    global PUMP_CATALOG, MOTOR_CATALOG
+
+    if not force and PUMP_CATALOG is not None and MOTOR_CATALOG is not None:
+        return
+
+    resolved_source = _resolve_catalog_source(source)
+    explicit = source is not None
+
+    if resolved_source == 'db':
+        try:
+            _load_catalogs_from_db()
+            load_cable_catalog(force=force, source='db')
+            return
+        except DatabaseConfigError as exc:
+            if explicit:
+                raise
+            logger.warning('Configuración PostgreSQL incompleta para catálogos: %s', exc)
+            resolved_source = 'excel'
+        except Exception as exc:
+            if explicit:
+                raise
+            logger.warning('No se pudieron cargar catálogos desde PostgreSQL (%s). Se utilizará Excel.', exc)
+            resolved_source = 'excel'
+
+    if resolved_source == 'excel':
+        _load_catalogs_from_excel(excel_path)
+        load_cable_catalog(force=force, source='file')
+        return
+
+    raise ValueError(f"Fuente de catálogos desconocida: {source}")
 
 
 def get_pump_catalog():
@@ -446,23 +655,10 @@ def get_cable_specs(cable_id: str) -> Optional[dict]:
 
 def get_column_mapping():
     """Devuelve el último mapeo de columnas detectado (cargando catálogos si es necesario)."""
-    if PUMP_CATALOG is None or MOTOR_CATALOG is None:
+    if COLUMN_MAPPING_CACHE is None:
         load_catalogs()
 
-    return {
-        'pump_sheet': PUMP_SHEET_NAME,
-        'motor_sheet': MOTOR_SHEET_NAME,
-        'pump_id_col': COL_PUMP_ID,
-        'pump_min_q_col': COL_PUMP_MIN_Q,
-        'pump_max_q_col': COL_PUMP_MAX_Q,
-        'pump_head_coeffs': COLS_PUMP_HEAD,
-        'pump_bhp_coeffs': COLS_PUMP_BHP,
-        'pump_eff_coeffs': COLS_PUMP_EFF,
-        'motor_id_col': COL_MOTOR_ID,
-        'motor_hp_col': COL_MOTOR_HP,
-        'motor_amps_col': COL_MOTOR_AMPS,
-        'motor_voltage_col': COL_MOTOR_VOLTAGE
-    }
+    return dict(COLUMN_MAPPING_CACHE or {})
 
 
 def get_pump_sheet_name():
@@ -478,11 +674,11 @@ def get_motor_sheet_name():
 
 
 def get_catalog_excel_path():
-    return EXCEL_FILE_NAME
+    return CATALOG_EXCEL_PATH
 
 
 def refresh_catalogs():
-    load_catalogs()
+    load_catalogs(force=True)
 
 def get_pump_performance_curves(
     pump_id,
