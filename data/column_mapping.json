@@ -37,5 +37,15 @@
   "motor_id_col": "Tipo motor",
   "motor_hp_col": "HP NOM",
   "motor_amps_col": "AMP NOM",
-  "motor_voltage_col": "VOLT NOM"
+  "motor_voltage_col": "VOLT NOM",
+  "motor_column_map": {
+    "descripcion": "Descripción",
+    "hp_nom": "HP NOM",
+    "volt_nom": "VOLT NOM",
+    "amp_nom": "AMP NOM",
+    "cos_fi_nom": "COS FI NOM",
+    "eff": "EFF",
+    "hz_nom": "HZ NOM",
+    "tipo_motor": "Tipo motor"
+  }
 }
