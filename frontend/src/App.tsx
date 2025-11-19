@@ -42,6 +42,19 @@ const DEFAULT_FILTER_INDUCTANCE = 0.0001
 
 const DEFAULT_VSD_EFFICIENCY = 0.97
 const DEFAULT_VSD_POWER_FACTOR = 0.96
+const MAX_COMPARISON_PUMPS = 10
+const COMPARISON_COLOR_PALETTE = [
+  '#3498db',
+  '#e74c3c',
+  '#2ecc71',
+  '#f39c12',
+  '#9b59b6',
+  '#1abc9c',
+  '#e84393',
+  '#16a085',
+  '#d35400',
+  '#8e44ad'
+]
 
 const interpolateValue = (qArray: number[], valueArray: number[], targetQ: number) => {
   if (!Array.isArray(qArray) || !Array.isArray(valueArray) || qArray.length === 0 || valueArray.length === 0) {
@@ -309,6 +322,24 @@ const buildCombinedPumpCurves = (curveList: any[]): any | null => {
 }
 
 type DesignPump = { id: string | null; stages: number }
+type ComparisonPumpConfig = {
+  pump: string | null
+  freq: number
+  stages: number
+  multiFreq: boolean
+  color: string
+}
+
+const createComparisonPumpSeed = (): ComparisonPumpConfig[] =>
+  Array.from({ length: MAX_COMPARISON_PUMPS }, (_, index) => ({
+    pump: null,
+    freq: 50,
+    stages: 300,
+    multiFreq: false,
+    color: COMPARISON_COLOR_PALETTE[index % COMPARISON_COLOR_PALETTE.length]
+  }))
+
+const createComparisonCurveSeed = () => Array(MAX_COMPARISON_PUMPS).fill(null)
 
 export default function App() {
   const [pumps, setPumps] = useState<string[]>([])
@@ -368,37 +399,21 @@ export default function App() {
   const [isComparisonMode, setIsComparisonMode] = useState(false)
   const [numPumpsToCompare, setNumPumpsToCompare] = useState(2)
   const [curveTypeToCompare, setCurveTypeToCompare] = useState<'head' | 'bhp' | 'efficiency'>('head')
-  
-  // Estados para cada bomba en el comparador (hasta 5 bombas)
-  const [pump1, setPump1] = useState<string | null>(null)
-  const [pump1Freq, setPump1Freq] = useState(50)
-  const [pump1Stages, setPump1Stages] = useState(300)
-  const [pump1MultiFreq, setPump1MultiFreq] = useState(false)
-  const [pump1Curves, setPump1Curves] = useState<any>(null)
-  
-  const [pump2, setPump2] = useState<string | null>(null)
-  const [pump2Freq, setPump2Freq] = useState(50)
-  const [pump2Stages, setPump2Stages] = useState(300)
-  const [pump2MultiFreq, setPump2MultiFreq] = useState(false)
-  const [pump2Curves, setPump2Curves] = useState<any>(null)
-  
-  const [pump3, setPump3] = useState<string | null>(null)
-  const [pump3Freq, setPump3Freq] = useState(50)
-  const [pump3Stages, setPump3Stages] = useState(300)
-  const [pump3MultiFreq, setPump3MultiFreq] = useState(false)
-  const [pump3Curves, setPump3Curves] = useState<any>(null)
+  const [comparisonPumpConfigs, setComparisonPumpConfigs] = useState<ComparisonPumpConfig[]>(() => createComparisonPumpSeed())
+  const [comparisonPumpCurves, setComparisonPumpCurves] = useState<any[]>(() => createComparisonCurveSeed())
 
-  const [pump4, setPump4] = useState<string | null>(null)
-  const [pump4Freq, setPump4Freq] = useState(50)
-  const [pump4Stages, setPump4Stages] = useState(300)
-  const [pump4MultiFreq, setPump4MultiFreq] = useState(false)
-  const [pump4Curves, setPump4Curves] = useState<any>(null)
+  const updateComparisonPumpConfig = useCallback(
+    (index: number, changes: Partial<ComparisonPumpConfig>) => {
+      setComparisonPumpConfigs((prev) =>
+        prev.map((config, idx) => (idx === index ? { ...config, ...changes } : config))
+      )
+    },
+    []
+  )
 
-  const [pump5, setPump5] = useState<string | null>(null)
-  const [pump5Freq, setPump5Freq] = useState(50)
-  const [pump5Stages, setPump5Stages] = useState(300)
-  const [pump5MultiFreq, setPump5MultiFreq] = useState(false)
-  const [pump5Curves, setPump5Curves] = useState<any>(null)
+  const updateComparisonPumpCurves = useCallback((index: number, curves: any) => {
+    setComparisonPumpCurves((prev) => prev.map((entry, idx) => (idx === index ? curves : entry)))
+  }, [])
 
   // Estados para IPR (Inflow Performance Relationship) - UNIDADES MÉTRICAS
   const [showIPR, setShowIPR] = useState(false)
@@ -2298,37 +2313,33 @@ export default function App() {
   // useEffect para actualizar curvas en modo comparador
   useEffect(() => {
     if (!isComparisonMode) return
-    
+
     setLoading(true)
-    const promises = []
-    
-    if (pump1) {
-      promises.push(fetchPumpCurves(pump1, pump1Freq, pump1Stages, pump1MultiFreq, setPump1Curves))
-    }
-    if (pump2) {
-      promises.push(fetchPumpCurves(pump2, pump2Freq, pump2Stages, pump2MultiFreq, setPump2Curves))
-    }
-    if (numPumpsToCompare >= 3 && pump3) {
-      promises.push(fetchPumpCurves(pump3, pump3Freq, pump3Stages, pump3MultiFreq, setPump3Curves))
-    }
-    if (numPumpsToCompare >= 4 && pump4) {
-      promises.push(fetchPumpCurves(pump4, pump4Freq, pump4Stages, pump4MultiFreq, setPump4Curves))
-    }
-    if (numPumpsToCompare >= 5 && pump5) {
-      promises.push(fetchPumpCurves(pump5, pump5Freq, pump5Stages, pump5MultiFreq, setPump5Curves))
-    }
-    
+    const promises = comparisonPumpConfigs.slice(0, numPumpsToCompare).map((config, index) => {
+      if (!config.pump) {
+        updateComparisonPumpCurves(index, null)
+        return null
+      }
+      return fetchPumpCurves(
+        config.pump,
+        config.freq,
+        config.stages,
+        config.multiFreq,
+        (curves) => updateComparisonPumpCurves(index, curves)
+      )
+    }).filter(Boolean) as Promise<void>[]
+
     Promise.all(promises).finally(() => setLoading(false))
   }, [
     isComparisonMode,
-    pump1, pump1Freq, pump1Stages, pump1MultiFreq,
-    pump2, pump2Freq, pump2Stages, pump2MultiFreq,
-  pump3, pump3Freq, pump3Stages, pump3MultiFreq,
-  pump4, pump4Freq, pump4Stages, pump4MultiFreq,
-  pump5, pump5Freq, pump5Stages, pump5MultiFreq,
-  numPumpsToCompare,
-    points, minFreq, maxFreq, numCurves,
-    selectedMotorId
+    comparisonPumpConfigs,
+    numPumpsToCompare,
+    points,
+    minFreq,
+    maxFreq,
+    numCurves,
+    selectedMotorId,
+    updateComparisonPumpCurves
   ])
 
   // Auto-fetch curves when pump, frequency, stages, or points change
@@ -2759,10 +2770,11 @@ export default function App() {
           <label className="panel-field">
             <span>Number of Pumps</span>
             <select value={numPumpsToCompare} onChange={(event) => setNumPumpsToCompare(Number(event.target.value))}>
-              <option value={2}>2 Pumps</option>
-              <option value={3}>3 Pumps</option>
-              <option value={4}>4 Pumps</option>
-              <option value={5}>5 Pumps</option>
+              {Array.from({ length: MAX_COMPARISON_PUMPS - 1 }, (_, idx) => idx + 2).map((count) => (
+                <option key={`compare-count-${count}`} value={count}>
+                  {count} Pumps
+                </option>
+              ))}
             </select>
           </label>
         </div>
@@ -2770,13 +2782,24 @@ export default function App() {
       <div className="panel-card">
         <h3 className="panel-heading">Pump Parameters</h3>
         {(() => {
-          const pumpConfigs = [
-            { pump: pump1, setPump: setPump1, freq: pump1Freq, setFreq: setPump1Freq, stages: pump1Stages, setStages: setPump1Stages, multiFreq: pump1MultiFreq, setMultiFreq: setPump1MultiFreq },
-            { pump: pump2, setPump: setPump2, freq: pump2Freq, setFreq: setPump2Freq, stages: pump2Stages, setStages: setPump2Stages, multiFreq: pump2MultiFreq, setMultiFreq: setPump2MultiFreq },
-            { pump: pump3, setPump: setPump3, freq: pump3Freq, setFreq: setPump3Freq, stages: pump3Stages, setStages: setPump3Stages, multiFreq: pump3MultiFreq, setMultiFreq: setPump3MultiFreq },
-            { pump: pump4, setPump: setPump4, freq: pump4Freq, setFreq: setPump4Freq, stages: pump4Stages, setStages: setPump4Stages, multiFreq: pump4MultiFreq, setMultiFreq: setPump4MultiFreq },
-            { pump: pump5, setPump: setPump5, freq: pump5Freq, setFreq: setPump5Freq, stages: pump5Stages, setStages: setPump5Stages, multiFreq: pump5MultiFreq, setMultiFreq: setPump5MultiFreq }
-          ]
+          const pumpConfigs = comparisonPumpConfigs.map((config, index) => {
+            const fallbackColor = config.color || COMPARISON_COLOR_PALETTE[index % COMPARISON_COLOR_PALETTE.length]
+            return {
+              pump: config.pump,
+              setPump: (value: string | null) => updateComparisonPumpConfig(index, { pump: value }),
+              freq: config.freq,
+              setFreq: (value: number) => updateComparisonPumpConfig(index, { freq: value }),
+              stages: config.stages,
+              setStages: (value: number) => updateComparisonPumpConfig(index, { stages: value }),
+              multiFreq: config.multiFreq,
+              setMultiFreq: (value: boolean) => updateComparisonPumpConfig(index, { multiFreq: value }),
+              color: fallbackColor,
+              setColor: (value: string) => {
+                const next = value && value.trim().length ? value : fallbackColor
+                updateComparisonPumpConfig(index, { color: next })
+              }
+            }
+          })
           const activePumpConfigs = pumpConfigs.slice(0, numPumpsToCompare)
 
           return (
@@ -2833,6 +2856,19 @@ export default function App() {
                       step={1}
                     />
                   </label>
+                  <label className="pump-card__field">
+                    <span className="pump-card__label">Curve Color</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <input
+                        type="color"
+                        value={pumpState.color}
+                        onChange={(event) => pumpState.setColor(event.target.value)}
+                        style={{ width: 36, height: 36, border: 'none', background: 'transparent', padding: 0 }}
+                        aria-label={`Select color for pump ${index + 1}`}
+                      />
+                      <code style={{ color: '#dbe4ff', fontWeight: 600 }}>{pumpState.color.toUpperCase()}</code>
+                    </div>
+                  </label>
                 </div>
               ))}
             </div>
@@ -2840,14 +2876,9 @@ export default function App() {
         })()}
       </div>
       {(() => {
-        const pumpConfigs = [
-          pump1MultiFreq,
-          pump2MultiFreq,
-          pump3MultiFreq,
-          pump4MultiFreq,
-          pump5MultiFreq
-        ]
-        const hasMultiFreq = pumpConfigs.slice(0, numPumpsToCompare).some(Boolean)
+        const hasMultiFreq = comparisonPumpConfigs
+          .slice(0, numPumpsToCompare)
+          .some((config) => config.multiFreq)
         if (!hasMultiFreq) {
           return null
         }
@@ -3680,13 +3711,14 @@ export default function App() {
             curves={null}
             isComparisonMode={true}
             comparisonData={{
-              pumps: [
-                { id: pump1, curves: pump1Curves, multiFreq: pump1MultiFreq, name: pump1 || 'Pump 1' },
-                { id: pump2, curves: pump2Curves, multiFreq: pump2MultiFreq, name: pump2 || 'Pump 2' },
-                { id: pump3, curves: pump3Curves, multiFreq: pump3MultiFreq, name: pump3 || 'Pump 3' },
-                { id: pump4, curves: pump4Curves, multiFreq: pump4MultiFreq, name: pump4 || 'Pump 4' },
-                { id: pump5, curves: pump5Curves, multiFreq: pump5MultiFreq, name: pump5 || 'Pump 5' }
-              ]
+              pumps: comparisonPumpConfigs
+                .map((config, index) => ({
+                  id: config.pump,
+                  curves: comparisonPumpCurves[index],
+                  multiFreq: config.multiFreq,
+                  name: config.pump || `Pump ${index + 1}`,
+                  color: config.color || COMPARISON_COLOR_PALETTE[index % COMPARISON_COLOR_PALETTE.length]
+                }))
                 .slice(0, numPumpsToCompare)
                 .filter((pumpEntry) => pumpEntry.id),
               curveType: curveTypeToCompare

@@ -1587,7 +1587,7 @@ function MultiFreqPlot({
 // Componente para comparación de bombas
 function ComparisonPlot({ comparisonData }: any) {
   const { pumps, curveType } = comparisonData
-  const colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c']
+  const fallbackColors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e84393', '#16a085', '#d35400', '#8e44ad']
   
   if (!pumps || pumps.length === 0) {
     return (
@@ -1611,7 +1611,11 @@ function ComparisonPlot({ comparisonData }: any) {
   pumps.forEach((pump: any, pumpIdx: number) => {
     if (!pump.curves) return
     
-    const color = colors[pumpIdx % colors.length]
+    const baseColor = pump.color && typeof pump.color === 'string' && pump.color.trim().length
+      ? pump.color
+      : fallbackColors[pumpIdx % fallbackColors.length]
+    const strongFill = applyAlphaToHex(baseColor, 0.25)
+    const softFill = applyAlphaToHex(baseColor, 0.12)
     
     // Si la bomba está en modo multi-frecuencia
     if (pump.multiFreq && Array.isArray(pump.curves)) {
@@ -1662,8 +1666,8 @@ function ComparisonPlot({ comparisonData }: any) {
           x: envelopeX,
           y: envelopeY,
           fill: 'toself',
-          fillcolor: `${color}33`, // 33 = 20% opacity en hex
-          line: { color: color, width: 2 },
+          fillcolor: strongFill,
+          line: { color: baseColor, width: 2 },
           type: 'scatter',
           mode: 'lines',
           name: `${pump.name} (Multi-Freq)`,
@@ -1693,7 +1697,7 @@ function ComparisonPlot({ comparisonData }: any) {
           x: [operatingRange.min_q, operatingRange.min_q, operatingRange.max_q, operatingRange.max_q, operatingRange.min_q],
           y: [0, maxValue * 1.5, maxValue * 1.5, 0, 0],
           fill: 'toself',
-          fillcolor: `${color}1A`, // 1A = 10% opacity
+          fillcolor: softFill,
           line: { width: 0 },
           type: 'scatter',
           mode: 'lines',
@@ -1710,7 +1714,7 @@ function ComparisonPlot({ comparisonData }: any) {
         type: 'scatter',
         mode: 'lines',
         name: pump.name,
-        line: { color: color, width: 3 },
+        line: { color: baseColor, width: 3 },
         hovertemplate: `<b>${pump.name}</b><br>Q: %{x:.2f} m³/d<br>${curveLabels[curveType].name}: %{y:.2f} ${curveLabels[curveType].unit}<extra></extra>`
       })
       
@@ -1725,7 +1729,7 @@ function ComparisonPlot({ comparisonData }: any) {
           y: [maxEff],
           mode: 'markers',
           type: 'scatter',
-          marker: { color: color, size: 12, symbol: 'diamond', line: { color: 'white', width: 2 } },
+          marker: { color: baseColor, size: 12, symbol: 'diamond', line: { color: 'white', width: 2 } },
           name: `${pump.name} BEP`,
           showlegend: false,
           hovertemplate: `<b>${pump.name} BEP</b><br>Q: %{x:.2f} m³/d<br>Efficiency: %{y:.2f}%<extra></extra>`
